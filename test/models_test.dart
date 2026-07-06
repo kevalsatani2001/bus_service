@@ -237,7 +237,10 @@ void main() {
       'passengerName': 'Alice Smith',
       'passengerPhone': '+15550234',
       'seatNumber': '12A',
+      'boardingPoint': 'અડાજણ',
+      'dropPoint': 'બારડોલી',
       'qrHash': 'abc123hashxyz',
+      'trackingUrl': 'https://mytravels.com/track/ticket-001',
       'isScanned': false,
       'bookedAt': bookedAtTime.toIso8601String(),
     };
@@ -250,6 +253,9 @@ void main() {
       expect(ticket.passengerName, equals('Alice Smith'));
       expect(ticket.passengerPhone, equals('+15550234'));
       expect(ticket.seatNumber, equals('12A'));
+      expect(ticket.boardingPoint, equals('અડાજણ'));
+      expect(ticket.dropPoint, equals('બારડોલી'));
+      expect(ticket.trackingUrl, equals('https://mytravels.com/track/ticket-001'));
       expect(ticket.qrHash, equals('abc123hashxyz'));
       expect(ticket.isScanned, isFalse);
       expect(ticket.bookedAt.toIso8601String(), equals(bookedAtTime.toIso8601String()));

@@ -9,7 +9,10 @@ class Ticket {
   final String passengerName;
   final String passengerPhone;
   final String seatNumber; // Alphanumeric support (e.g. "12A", "15")
+  final String boardingPoint;
+  final String dropPoint;
   final String qrHash;
+  final String trackingUrl;
   final bool isScanned;
   final DateTime bookedAt;
 
@@ -20,7 +23,10 @@ class Ticket {
     required this.passengerName,
     required this.passengerPhone,
     required this.seatNumber,
+    this.boardingPoint = '',
+    this.dropPoint = '',
     required this.qrHash,
+    this.trackingUrl = '',
     required this.isScanned,
     required this.bookedAt,
   });
@@ -33,7 +39,10 @@ class Ticket {
     String? passengerName,
     String? passengerPhone,
     String? seatNumber,
+    String? boardingPoint,
+    String? dropPoint,
     String? qrHash,
+    String? trackingUrl,
     bool? isScanned,
     DateTime? bookedAt,
   }) {
@@ -44,7 +53,10 @@ class Ticket {
       passengerName: passengerName ?? this.passengerName,
       passengerPhone: passengerPhone ?? this.passengerPhone,
       seatNumber: seatNumber ?? this.seatNumber,
+      boardingPoint: boardingPoint ?? this.boardingPoint,
+      dropPoint: dropPoint ?? this.dropPoint,
       qrHash: qrHash ?? this.qrHash,
+      trackingUrl: trackingUrl ?? this.trackingUrl,
       isScanned: isScanned ?? this.isScanned,
       bookedAt: bookedAt ?? this.bookedAt,
     );
@@ -59,7 +71,10 @@ class Ticket {
       passengerName: json['passengerName'] as String? ?? '',
       passengerPhone: json['passengerPhone'] as String? ?? '',
       seatNumber: json['seatNumber'] as String? ?? '',
+      boardingPoint: json['boardingPoint'] as String? ?? '',
+      dropPoint: json['dropPoint'] as String? ?? '',
       qrHash: json['qrHash'] as String? ?? '',
+      trackingUrl: json['trackingUrl'] as String? ?? '',
       isScanned: json['isScanned'] as bool? ?? false,
       bookedAt: parseDateTime(json['bookedAt']) ?? DateTime.now(),
     );
@@ -74,7 +89,10 @@ class Ticket {
       'passengerName': passengerName,
       'passengerPhone': passengerPhone,
       'seatNumber': seatNumber,
+      'boardingPoint': boardingPoint,
+      'dropPoint': dropPoint,
       'qrHash': qrHash,
+      'trackingUrl': trackingUrl,
       'isScanned': isScanned,
       'bookedAt': bookedAt.toIso8601String(),
     };

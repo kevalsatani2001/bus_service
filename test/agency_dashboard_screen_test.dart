@@ -77,7 +77,7 @@ void main() {
 
     // Booking view should now render
     expect(find.text('Generate Ticket / QR Code'), findsOneWidget);
-    expect(find.text('Passenger Name'), findsOneWidget);
+    expect(find.text('Passenger Name (પેસેન્જર નામ)'), findsOneWidget);
 
     // Reset physical size
     addTearDown(tester.view.resetPhysicalSize);

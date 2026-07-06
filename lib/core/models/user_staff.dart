@@ -26,12 +26,22 @@ class UserStaff {
   final UserRole role;
   final String tenantId;
 
+  // New fields for Driver Registration
+  final String? email;
+  final String? licenseNumber;
+  final String? vehicleDetails;
+  final String? status; // 'pending', 'approved'
+
   const UserStaff({
     required this.uid,
     required this.name,
     required this.phone,
     required this.role,
     required this.tenantId,
+    this.email,
+    this.licenseNumber,
+    this.vehicleDetails,
+    this.status = 'approved',
   });
 
   /// Returns a new [UserStaff] instance with optionally modified fields.
@@ -41,6 +51,10 @@ class UserStaff {
     String? phone,
     UserRole? role,
     String? tenantId,
+    String? email,
+    String? licenseNumber,
+    String? vehicleDetails,
+    String? status,
   }) {
     return UserStaff(
       uid: uid ?? this.uid,
@@ -48,6 +62,10 @@ class UserStaff {
       phone: phone ?? this.phone,
       role: role ?? this.role,
       tenantId: tenantId ?? this.tenantId,
+      email: email ?? this.email,
+      licenseNumber: licenseNumber ?? this.licenseNumber,
+      vehicleDetails: vehicleDetails ?? this.vehicleDetails,
+      status: status ?? this.status,
     );
   }
 
@@ -59,6 +77,10 @@ class UserStaff {
       phone: json['phone'] as String? ?? '',
       role: UserRole.fromString(json['role'] as String? ?? ''),
       tenantId: json['tenantId'] as String? ?? '',
+      email: json['email'] as String?,
+      licenseNumber: json['licenseNumber'] as String?,
+      vehicleDetails: json['vehicleDetails'] as String?,
+      status: json['status'] as String? ?? 'approved',
     );
   }
 
@@ -70,6 +92,10 @@ class UserStaff {
       'phone': phone,
       'role': role.toJson(),
       'tenantId': tenantId,
+      if (email != null) 'email': email,
+      if (licenseNumber != null) 'licenseNumber': licenseNumber,
+      if (vehicleDetails != null) 'vehicleDetails': vehicleDetails,
+      if (status != null) 'status': status,
     };
   }
 
@@ -81,16 +107,30 @@ class UserStaff {
         other.name == name &&
         other.phone == phone &&
         other.role == role &&
-        other.tenantId == tenantId;
+        other.tenantId == tenantId &&
+        other.email == email &&
+        other.licenseNumber == licenseNumber &&
+        other.vehicleDetails == vehicleDetails &&
+        other.status == status;
   }
 
   @override
   int get hashCode {
-    return Object.hash(uid, name, phone, role, tenantId);
+    return Object.hash(
+      uid,
+      name,
+      phone,
+      role,
+      tenantId,
+      email,
+      licenseNumber,
+      vehicleDetails,
+      status,
+    );
   }
 
   @override
   String toString() {
-    return 'UserStaff(uid: $uid, name: $name, phone: $phone, role: $role, tenantId: $tenantId)';
+    return 'UserStaff(uid: $uid, name: $name, phone: $phone, role: $role, tenantId: $tenantId, email: $email, licenseNumber: $licenseNumber, vehicleDetails: $vehicleDetails, status: $status)';
   }
 }

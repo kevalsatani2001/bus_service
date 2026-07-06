@@ -1,6 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:go_router/go_router.dart';
 import 'package:fl_chart/fl_chart.dart';
+import 'package:bus_service/core/blocs/auth_bloc.dart';
+import 'package:bus_service/core/blocs/theme_bloc.dart';
+import 'package:bus_service/core/theme/tenant_theme_loader.dart';
 import 'package:bus_service/core/models/models.dart';
+import 'package:bus_service/core/services/firestore_service.dart';
+import 'package:bus_service/core/services/seed_data_service.dart';
 import 'package:bus_service/web_panels/agency_dashboard/widgets/ticket_booking_form.dart';
 
 class AgencyDashboardScreen extends StatefulWidget {
@@ -16,105 +23,170 @@ class _AgencyDashboardScreenState extends State<AgencyDashboardScreen> {
   int _activeTabIndex = 0;
   bool _isSidebarCollapsed = false;
 
-  Color get _primaryColor => widget.themeColor ?? Colors.indigo;
+  List<Bus> _buses = [];
+  List<Trip> _trips = [];
+  List<UserStaff> _staff = [];
+  Tenant? _agencyTenant;
+  bool _loading = true;
+
+  // Profile fields controllers
+  final _profileNameCtrl = TextEditingController();
+  final _profileOwnerCtrl = TextEditingController();
+  final _profileEmailCtrl = TextEditingController();
+  final _profilePhoneCtrl = TextEditingController();
+  final _profileLicenseCtrl = TextEditingController();
+  String _profileColorHex = '#3F51B5';
+  bool _profileInitialized = false;
+
+  String get _tenantId {
+    try {
+      final fromAuth = context.read<AuthBloc>().state.tenantId;
+      if (fromAuth != null && fromAuth.isNotEmpty) return fromAuth;
+    } catch (_) {}
+    return SeedDataService.defaultTenantId;
+  }
+
+  Color get _primaryColor {
+    try {
+      return context.watch<ThemeBloc>().state.themeColor;
+    } catch (_) {}
+    return widget.themeColor ?? Colors.indigo;
+  }
 
   final List<Map<String, dynamic>> _navItems = [
     {'title': 'Overview/Stats', 'icon': Icons.analytics_outlined},
     {'title': 'Buses', 'icon': Icons.directions_bus_outlined},
     {'title': 'Trips', 'icon': Icons.route_outlined},
     {'title': 'Book Ticket / Generate QR', 'icon': Icons.qr_code_outlined},
-  ];
-
-  // Dummy fleet list
-  final List<Bus> _dummyBuses = [
-    Bus(id: 'B1', busNumber: 'DL-01-A-1234', tenantId: 'T1', totalSeats: 36, layoutType: BusLayoutType.sleeper),
-    Bus(id: 'B2', busNumber: 'MH-12-PQ-5678', tenantId: 'T1', totalSeats: 45, layoutType: BusLayoutType.seater),
-    Bus(id: 'B3', busNumber: 'KA-03-XY-9876', tenantId: 'T1', totalSeats: 30, layoutType: BusLayoutType.sleeper),
-    Bus(id: 'B4', busNumber: 'UP-16-Z-5432', tenantId: 'T1', totalSeats: 48, layoutType: BusLayoutType.seater),
-  ];
-
-  // Dummy trips list
-  final List<Trip> _dummyTrips = [
-    Trip(
-      id: 'TR001',
-      tenantId: 'T1',
-      busId: 'B1',
-      driverId: 'D101',
-      routeId: 'Delhi - Jaipur',
-      status: TripStatus.live,
-      startDateTime: DateTime.now(),
-    ),
-    Trip(
-      id: 'TR002',
-      tenantId: 'T1',
-      busId: 'B2',
-      driverId: 'D102',
-      routeId: 'Mumbai - Pune',
-      status: TripStatus.scheduled,
-      startDateTime: DateTime.now().add(const Duration(hours: 4)),
-    ),
-    Trip(
-      id: 'TR003',
-      tenantId: 'T1',
-      busId: 'B3',
-      driverId: 'D103',
-      routeId: 'Bangalore - Chennai',
-      status: TripStatus.completed,
-      startDateTime: DateTime.now().subtract(const Duration(days: 1)),
-    ),
+    {'title': 'Drivers', 'icon': Icons.people_outline},
+    {'title': 'Agency Profile', 'icon': Icons.settings_outlined},
   ];
 
   @override
+  void initState() {
+    super.initState();
+    _loadData();
+  }
+
+  @override
+  void dispose() {
+    _profileNameCtrl.dispose();
+    _profileOwnerCtrl.dispose();
+    _profileEmailCtrl.dispose();
+    _profilePhoneCtrl.dispose();
+    _profileLicenseCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadData() async {
+    final fs = FirestoreService.instance;
+    final results = await Future.wait([
+      fs.getBuses(_tenantId),
+      fs.getTrips(_tenantId),
+      fs.getStaff(_tenantId),
+      fs.getTenant(_tenantId),
+    ]);
+    if (mounted) {
+      final tenant = results[3] as Tenant?;
+      setState(() {
+        _buses = results[0] as List<Bus>;
+        _trips = results[1] as List<Trip>;
+        _staff = results[2] as List<UserStaff>;
+        _agencyTenant = tenant;
+        _loading = false;
+      });
+
+      if (tenant != null) {
+        try {
+          final color = TenantThemeLoader.hexToColor(tenant.themeColorHex);
+          context.read<ThemeBloc>().add(ThemeLoadTenant(
+            color: color,
+            tenantName: tenant.name,
+          ));
+        } catch (_) {}
+      }
+    }
+  }
+
+  void _initProfileFields() {
+    if (_agencyTenant == null || _profileInitialized) return;
+    _profileNameCtrl.text = _agencyTenant!.name;
+    _profileOwnerCtrl.text = _agencyTenant!.ownerName ?? '';
+    _profileEmailCtrl.text = _agencyTenant!.email ?? '';
+    _profilePhoneCtrl.text = _agencyTenant!.phone ?? '';
+    _profileLicenseCtrl.text = _agencyTenant!.businessLicenseNo ?? '';
+    _profileColorHex = _agencyTenant!.themeColorHex;
+    _profileInitialized = true;
+  }
+
+  String _staffName(String uid) =>
+      _staff.where((s) => s.uid == uid).map((s) => s.name).firstOrNull ?? uid;
+
+  String _busNumber(String busId) =>
+      _buses.where((b) => b.id == busId).map((b) => b.busNumber).firstOrNull ?? busId;
+
+  void _logout() {
+    try {
+      context.read<AuthBloc>().add(AuthLogoutRequested());
+      context.read<ThemeBloc>().add(ThemeReset());
+    } catch (_) {}
+    context.go('/');
+  }
+
+  @override
   Widget build(BuildContext context) {
-    // Breakpoint: 900px width for responsive adaptations.
     final bool isMobileOrTablet = MediaQuery.of(context).size.width < 900;
 
     return Scaffold(
       appBar: isMobileOrTablet
           ? AppBar(
-              title: Text('${_navItems[_activeTabIndex]['title']} - Agency Portal'),
-              backgroundColor: Colors.white,
-              foregroundColor: Colors.grey.shade800,
+              title: Text('${_navItems[_activeTabIndex]['title']}'),
+              backgroundColor: _primaryColor,
+              foregroundColor: Colors.white,
               elevation: 1,
-              iconTheme: IconThemeData(color: _primaryColor),
+              actions: [
+                IconButton(icon: const Icon(Icons.logout), onPressed: _logout),
+              ],
             )
           : null,
       drawer: isMobileOrTablet ? _buildDrawer() : null,
-      body: Row(
-        children: [
-          // Render Desktop Sidebar only when width >= 900
-          if (!isMobileOrTablet) _buildSidebar(),
-          
-          // Main Body Content
-          Expanded(
-            child: Container(
-              color: Colors.grey.shade50,
-              padding: const EdgeInsets.all(24.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Desktop page header
-                  if (!isMobileOrTablet) ...[
-                    _buildDesktopHeader(),
-                    const SizedBox(height: 24),
-                  ],
-                  // Current active view
-                  Expanded(
-                    child: AnimatedSwitcher(
-                      duration: const Duration(milliseconds: 250),
-                      child: _buildActiveTabContent(),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : Row(
+              children: [
+                if (!isMobileOrTablet) _buildSidebar(),
+                Expanded(
+                  child: Container(
+                    color: Colors.grey.shade50,
+                    padding: const EdgeInsets.all(24.0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (!isMobileOrTablet) ...[
+                          _buildDesktopHeader(),
+                          const SizedBox(height: 24),
+                        ],
+                        Expanded(
+                          child: AnimatedSwitcher(
+                            duration: const Duration(milliseconds: 250),
+                            child: _buildActiveTabContent(),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
-          ),
-        ],
-      ),
     );
   }
 
   Widget _buildDesktopHeader() {
+    String userName = 'Agency User';
+    try {
+      final name = context.watch<AuthBloc>().state.userName;
+      if (name != null) userName = name;
+    } catch (_) {}
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
@@ -130,27 +202,16 @@ class _AgencyDashboardScreenState extends State<AgencyDashboardScreen> {
               Text(
                 'Welcome back! Here is a summary of your agency metrics.',
                 style: TextStyle(fontSize: 14, color: Colors.grey.shade500),
-                overflow: TextOverflow.ellipsis,
               ),
             ],
           ),
         ),
-        const SizedBox(width: 16),
         Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            IconButton(
-              icon: const Badge(
-                label: Text('3'),
-                child: Icon(Icons.notifications_none, size: 24),
-              ),
-              onPressed: () {},
-            ),
-            const SizedBox(width: 16),
-            const CircleAvatar(
-              backgroundColor: Colors.indigo,
-              child: Icon(Icons.person_outline, color: Colors.white),
-            ),
+            Text(userName, style: TextStyle(color: Colors.grey.shade600, fontSize: 13, fontWeight: FontWeight.bold)),
+            const SizedBox(width: 8),
+            IconButton(icon: const Icon(Icons.logout), onPressed: _logout, tooltip: 'Logout'),
           ],
         ),
       ],
@@ -168,31 +229,21 @@ class _AgencyDashboardScreenState extends State<AgencyDashboardScreen> {
         ),
         child: Column(
           children: [
-            // Sidebar Logo / Title
             Container(
-            padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
-            child: Row(
-              mainAxisAlignment:
-                  _isSidebarCollapsed ? MainAxisAlignment.center : MainAxisAlignment.start,
-              children: [
-                Icon(Icons.directions_bus, color: _primaryColor, size: 28),
-                if (!_isSidebarCollapsed) ...[
-                  const SizedBox(width: 12),
-                  const Expanded(
-                    child: Text(
-                      'AgencyPortal',
-                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, letterSpacing: 0.5),
-                      overflow: TextOverflow.ellipsis,
+              padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
+              child: Row(
+                children: [
+                  Icon(Icons.directions_bus, color: _primaryColor, size: 28),
+                  if (!_isSidebarCollapsed) ...[
+                    const SizedBox(width: 12),
+                    const Expanded(
+                      child: Text('AgencyPortal', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
                     ),
-                  ),
+                  ],
                 ],
-              ],
+              ),
             ),
-          ),
-            
             const Divider(height: 1),
-            
-            // Navigation links list
             Expanded(
               child: ListView.builder(
                 padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
@@ -200,53 +251,24 @@ class _AgencyDashboardScreenState extends State<AgencyDashboardScreen> {
                 itemBuilder: (context, index) {
                   final item = _navItems[index];
                   final isSelected = _activeTabIndex == index;
-                  return Container(
-                    margin: const EdgeInsets.only(bottom: 8),
-                    child: Tooltip(
-                      message: _isSidebarCollapsed ? item['title'] as String : '',
-                      child: ListTile(
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                        selected: isSelected,
-                        selectedTileColor: _primaryColor.withOpacity(0.08),
-                        selectedColor: _primaryColor,
-                        textColor: Colors.grey.shade600,
-                        iconColor: Colors.grey.shade400,
-                        leading: Icon(
-                          item['icon'] as IconData,
-                          size: 18,
-                          color: isSelected ? _primaryColor : Colors.grey.shade500,
-                        ),
-                        title: _isSidebarCollapsed
-                            ? null
-                            : Text(
-                                item['title'] as String,
-                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-                              ),
-                        onTap: () {
-                          setState(() {
-                            _activeTabIndex = index;
-                          });
-                        },
-                      ),
-                    ),
+                  return ListTile(
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    selected: isSelected,
+                    selectedTileColor: _primaryColor.withOpacity(0.08),
+                    selectedColor: _primaryColor,
+                    leading: Icon(item['icon'] as IconData, size: 18),
+                    title: _isSidebarCollapsed
+                        ? null
+                        : Text(item['title'] as String, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                    onTap: () => setState(() => _activeTabIndex = index),
                   );
                 },
               ),
             ),
-            
-            // Sidebar Collapse trigger button
-            const Divider(height: 1),
             ListTile(
-              leading: Icon(
-                _isSidebarCollapsed ? Icons.keyboard_double_arrow_right : Icons.keyboard_double_arrow_left,
-                color: Colors.grey,
-              ),
-              title: _isSidebarCollapsed ? null : const Text('Collapse Sidebar', style: TextStyle(color: Colors.grey)),
-              onTap: () {
-                setState(() {
-                  _isSidebarCollapsed = !_isSidebarCollapsed;
-                });
-              },
+              leading: Icon(_isSidebarCollapsed ? Icons.keyboard_double_arrow_right : Icons.keyboard_double_arrow_left),
+              title: _isSidebarCollapsed ? null : const Text('Collapse Sidebar'),
+              onTap: () => setState(() => _isSidebarCollapsed = !_isSidebarCollapsed),
             ),
           ],
         ),
@@ -256,47 +278,21 @@ class _AgencyDashboardScreenState extends State<AgencyDashboardScreen> {
 
   Widget _buildDrawer() {
     return Drawer(
-      child: Column(
-        children: [
-          DrawerHeader(
-            decoration: BoxDecoration(color: _primaryColor.withOpacity(0.05)),
-            child: Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.directions_bus, color: _primaryColor, size: 40),
-                  const SizedBox(height: 12),
-                  const Text(
-                    'Travel Agency Dashboard',
-                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          Expanded(
-            child: ListView.builder(
-              itemCount: _navItems.length,
-              itemBuilder: (context, index) {
-                final item = _navItems[index];
-                final isSelected = _activeTabIndex == index;
-                return ListTile(
-                  selected: isSelected,
-                  selectedTileColor: _primaryColor.withOpacity(0.08),
-                  selectedColor: _primaryColor,
-                  leading: Icon(item['icon'] as IconData, size: 16),
-                  title: Text(item['title'] as String, style: const TextStyle(fontWeight: FontWeight.bold)),
-                  onTap: () {
-                    setState(() {
-                      _activeTabIndex = index;
-                    });
-                    Navigator.of(context).pop(); // Close drawer
-                  },
-                );
-              },
-            ),
-          ),
-        ],
+      child: ListView.builder(
+        itemCount: _navItems.length,
+        itemBuilder: (context, index) {
+          final item = _navItems[index];
+          return ListTile(
+            selected: _activeTabIndex == index,
+            selectedColor: _primaryColor,
+            leading: Icon(item['icon'] as IconData),
+            title: Text(item['title'] as String),
+            onTap: () {
+              setState(() => _activeTabIndex = index);
+              Navigator.of(context).pop();
+            },
+          );
+        },
       ),
     );
   }
@@ -311,89 +307,38 @@ class _AgencyDashboardScreenState extends State<AgencyDashboardScreen> {
         return _buildTripsTab();
       case 3:
         return _buildBookTicketTab();
+      case 4:
+        return _buildDriversTab();
+      case 5:
+        return _buildProfileTab();
       default:
         return const SizedBox.shrink();
     }
   }
 
   Widget _buildOverviewTab() {
-    final double screenWidth = MediaQuery.of(context).size.width;
-    final int crossAxisCount = screenWidth < 600 ? 1 : (screenWidth < 1200 ? 2 : 3);
-
+    final liveTrips = _trips.where((t) => t.status == TripStatus.live).length;
     return SingleChildScrollView(
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Summary KPI Layout using responsive LayoutBuilder
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final double width = constraints.maxWidth;
-              if (width > 900) {
-                return Row(
-                  children: [
-                    Expanded(child: _buildKPICard('Active Fleet', '4 Buses', Icons.directions_bus, Colors.green)),
-                    const SizedBox(width: 16),
-                    Expanded(child: _buildKPICard("Today's Bookings", '184 Tickets', Icons.confirmation_number_outlined, Colors.amber)),
-                    const SizedBox(width: 16),
-                    Expanded(child: _buildKPICard('Live Trips Now', '2 Trips Live', Icons.cell_tower, Colors.blue)),
-                  ],
-                );
-              } else if (width > 600) {
-                return Column(
-                  children: [
-                    Row(
-                      children: [
-                        Expanded(child: _buildKPICard('Active Fleet', '4 Buses', Icons.directions_bus, Colors.green)),
-                        const SizedBox(width: 16),
-                        Expanded(child: _buildKPICard("Today's Bookings", '184 Tickets', Icons.confirmation_number_outlined, Colors.amber)),
-                      ],
-                    ),
-                    const SizedBox(height: 16),
-                    Row(
-                      children: [
-                        Expanded(child: _buildKPICard('Live Trips Now', '2 Trips Live', Icons.cell_tower, Colors.blue)),
-                        const SizedBox(width: 16),
-                        const Expanded(child: SizedBox.shrink()),
-                      ],
-                    ),
-                  ],
-                );
-              } else {
-                return Column(
-                  children: [
-                    _buildKPICard('Active Fleet', '4 Buses', Icons.directions_bus, Colors.green),
-                    const SizedBox(height: 16),
-                    _buildKPICard("Today's Bookings", '184 Tickets', Icons.confirmation_number_outlined, Colors.amber),
-                    const SizedBox(height: 16),
-                    _buildKPICard('Live Trips Now', '2 Trips Live', Icons.cell_tower, Colors.blue),
-                  ],
-                );
-              }
-            },
+          Row(
+            children: [
+              Expanded(child: _buildKPICard('Active Fleet', '${_buses.length} Buses', Icons.directions_bus, Colors.green)),
+              const SizedBox(width: 16),
+              Expanded(child: _buildKPICard('Live Trips Now', '$liveTrips Trips Live', Icons.cell_tower, Colors.blue)),
+            ],
           ),
-          
           const SizedBox(height: 24),
-          
-          // fl_chart Weekly Revenue Card
           Card(
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-            elevation: 1.5,
             child: Padding(
-              padding: const EdgeInsets.all(24.0),
+              padding: const EdgeInsets.all(24),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    'Weekly Booking Revenue',
-                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.grey.shade800),
-                  ),
-                  const SizedBox(height: 4),
-                  const Text('Revenue statistics for the current week (USD)', style: TextStyle(color: Colors.grey, fontSize: 13)),
+                  const Text('Weekly Booking Revenue', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
                   const SizedBox(height: 24),
-                  SizedBox(
-                    height: 300,
-                    child: _buildRevenueChart(),
-                  ),
+                  SizedBox(height: 300, child: _buildRevenueChart()),
                 ],
               ),
             ),
@@ -405,27 +350,22 @@ class _AgencyDashboardScreenState extends State<AgencyDashboardScreen> {
 
   Widget _buildKPICard(String title, String value, IconData icon, Color color) {
     return Card(
-      color: Colors.white,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      elevation: 1,
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 16.0),
+        padding: const EdgeInsets.all(20),
         child: Row(
           children: [
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(color: color.withOpacity(0.12), shape: BoxShape.circle),
-              child: Icon(icon, color: color, size: 24),
+              child: Icon(icon, color: color),
             ),
             const SizedBox(width: 16),
             Expanded(
               child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(title, style: TextStyle(color: Colors.grey.shade500, fontSize: 12, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 4),
-                  Text(value, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.black87)),
+                  Text(title, style: TextStyle(color: Colors.grey.shade500, fontSize: 12), overflow: TextOverflow.ellipsis),
+                  Text(value, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis),
                 ],
               ),
             ),
@@ -438,59 +378,28 @@ class _AgencyDashboardScreenState extends State<AgencyDashboardScreen> {
   Widget _buildRevenueChart() {
     return LineChart(
       LineChartData(
-        gridData: FlGridData(
-          show: true,
-          drawVerticalLine: false,
-          getDrawingHorizontalLine: (value) => FlLine(color: Colors.grey.shade100, strokeWidth: 1),
-        ),
+        gridData: FlGridData(show: true, drawVerticalLine: false),
         titlesData: FlTitlesData(
-          show: true,
-          rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-          topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
           bottomTitles: AxisTitles(
             sideTitles: SideTitles(
               showTitles: true,
-              reservedSize: 22,
-              getTitlesWidget: (value, meta) {
-                switch (value.toInt()) {
-                  case 0: return const Text('Mon');
-                  case 1: return const Text('Tue');
-                  case 2: return const Text('Wed');
-                  case 3: return const Text('Thu');
-                  case 4: return const Text('Fri');
-                  case 5: return const Text('Sat');
-                  case 6: return const Text('Sun');
-                }
-                return const Text('');
-              },
+              getTitlesWidget: (v, _) => Text(['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][v.toInt() % 7]),
             ),
           ),
+          leftTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+          topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+          rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
         ),
-        borderData: FlBorderData(show: false),
-        minX: 0,
-        maxX: 6,
-        minY: 0,
-        maxY: 1000,
         lineBarsData: [
           LineChartBarData(
             spots: const [
-              FlSpot(0, 300),
-              FlSpot(1, 450),
-              FlSpot(2, 400),
-              FlSpot(3, 650),
-              FlSpot(4, 800),
-              FlSpot(5, 750),
-              FlSpot(6, 950),
+              FlSpot(0, 300), FlSpot(1, 450), FlSpot(2, 400),
+              FlSpot(3, 650), FlSpot(4, 800), FlSpot(5, 750), FlSpot(6, 950),
             ],
             isCurved: true,
             color: _primaryColor,
             barWidth: 4,
-            isStrokeCapRound: true,
-            dotData: const FlDotData(show: true),
-            belowBarData: BarAreaData(
-              show: true,
-              color: _primaryColor.withOpacity(0.12),
-            ),
+            belowBarData: BarAreaData(show: true, color: _primaryColor.withOpacity(0.12)),
           ),
         ],
       ),
@@ -499,9 +408,8 @@ class _AgencyDashboardScreenState extends State<AgencyDashboardScreen> {
 
   Widget _buildBusesTab() {
     return Card(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Padding(
-        padding: const EdgeInsets.all(20.0),
+        padding: const EdgeInsets.all(20),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -513,7 +421,7 @@ class _AgencyDashboardScreenState extends State<AgencyDashboardScreen> {
                   style: ElevatedButton.styleFrom(backgroundColor: _primaryColor, foregroundColor: Colors.white),
                   icon: const Icon(Icons.add),
                   label: const Text('Add New Bus'),
-                  onPressed: () {},
+                  onPressed: _showAddBusDialog,
                 ),
               ],
             ),
@@ -524,25 +432,16 @@ class _AgencyDashboardScreenState extends State<AgencyDashboardScreen> {
                 child: DataTable(
                   columns: const [
                     DataColumn(label: Text('Bus ID')),
-                    DataColumn(label: Text('Bus Number')),
-                    DataColumn(label: Text('Total Capacity')),
-                    DataColumn(label: Text('Berth Layout')),
-                    DataColumn(label: Text('Fleet Status')),
+                    DataColumn(label: Text('Number Plate')),
+                    DataColumn(label: Text('Capacity')),
+                    DataColumn(label: Text('Layout')),
                   ],
-                  rows: _dummyBuses.map((bus) {
+                  rows: _buses.map((bus) {
                     return DataRow(cells: [
                       DataCell(Text(bus.id)),
                       DataCell(Text(bus.busNumber)),
                       DataCell(Text('${bus.totalSeats} seats')),
                       DataCell(Text(bus.layoutType == BusLayoutType.sleeper ? 'Sleeper (2x1)' : 'Seater (2x2)')),
-                      DataCell(
-                        Chip(
-                          label: const Text('Active', style: TextStyle(color: Colors.green, fontSize: 11)),
-                          backgroundColor: Colors.green.shade50,
-                          side: BorderSide.none,
-                          padding: EdgeInsets.zero,
-                        ),
-                      ),
                     ]);
                   }).toList(),
                 ),
@@ -556,21 +455,20 @@ class _AgencyDashboardScreenState extends State<AgencyDashboardScreen> {
 
   Widget _buildTripsTab() {
     return Card(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Padding(
-        padding: const EdgeInsets.all(20.0),
+        padding: const EdgeInsets.all(20),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Text('Trip Schedules & Dispatch', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+                const Text('Trip Schedules & Crew Assignment', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
                 ElevatedButton.icon(
                   style: ElevatedButton.styleFrom(backgroundColor: _primaryColor, foregroundColor: Colors.white),
                   icon: const Icon(Icons.add),
                   label: const Text('Schedule Trip'),
-                  onPressed: () {},
+                  onPressed: _showScheduleTripDialog,
                 ),
               ],
             ),
@@ -582,40 +480,28 @@ class _AgencyDashboardScreenState extends State<AgencyDashboardScreen> {
                   columns: const [
                     DataColumn(label: Text('Trip ID')),
                     DataColumn(label: Text('Route')),
-                    DataColumn(label: Text('Bus Reference')),
-                    DataColumn(label: Text('Driver ID')),
-                    DataColumn(label: Text('Trip Status')),
+                    DataColumn(label: Text('Bus')),
+                    DataColumn(label: Text('Driver')),
+                    DataColumn(label: Text('Conductor')),
+                    DataColumn(label: Text('Status')),
                   ],
-                  rows: _dummyTrips.map((trip) {
-                    Color chipColor;
-                    Color chipBg;
-                    switch (trip.status) {
-                      case TripStatus.live:
-                        chipColor = Colors.green;
-                        chipBg = Colors.green.shade50;
-                        break;
-                      case TripStatus.scheduled:
-                        chipColor = Colors.blue;
-                        chipBg = Colors.blue.shade50;
-                        break;
-                      case TripStatus.completed:
-                        chipColor = Colors.grey;
-                        chipBg = Colors.grey.shade100;
-                        break;
-                    }
+                  rows: _trips.map((trip) {
+                    Color chipColor = switch (trip.status) {
+                      TripStatus.live => Colors.green,
+                      TripStatus.scheduled => Colors.blue,
+                      TripStatus.completed => Colors.grey,
+                    };
                     return DataRow(cells: [
                       DataCell(Text(trip.id)),
                       DataCell(Text(trip.routeId)),
-                      DataCell(Text(trip.busId)),
-                      DataCell(Text(trip.driverId)),
-                      DataCell(
-                        Chip(
-                          label: Text(trip.status.name.toUpperCase(), style: TextStyle(color: chipColor, fontSize: 10, fontWeight: FontWeight.bold)),
-                          backgroundColor: chipBg,
-                          side: BorderSide.none,
-                          padding: EdgeInsets.zero,
-                        ),
-                      ),
+                      DataCell(Text(_busNumber(trip.busId))),
+                      DataCell(Text(_staffName(trip.driverId))),
+                      DataCell(Text(_staffName(trip.conductorId))),
+                      DataCell(Chip(
+                        label: Text(trip.status.name.toUpperCase(), style: TextStyle(color: chipColor, fontSize: 10)),
+                        backgroundColor: chipColor.withOpacity(0.1),
+                        side: BorderSide.none,
+                      )),
                     ]);
                   }).toList(),
                 ),
@@ -627,27 +513,441 @@ class _AgencyDashboardScreenState extends State<AgencyDashboardScreen> {
     );
   }
 
-  Widget _buildBookTicketTab() {
-    return Center(
-      child: Container(
-        constraints: const BoxConstraints(maxWidth: 700),
-        child: SingleChildScrollView(
+  Widget _buildDriversTab() {
+    final drivers = _staff.where((s) => s.role == UserRole.driver).toList();
+
+    return Card(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text('Agency Driver Management', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+                ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(backgroundColor: _primaryColor, foregroundColor: Colors.white),
+                  icon: const Icon(Icons.person_add),
+                  label: const Text('Add New Driver'),
+                  onPressed: _showAddDriverDialog,
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Expanded(
+              child: drivers.isEmpty
+                  ? Center(
+                      child: Text('No drivers added yet for this agency', style: TextStyle(color: Colors.grey.shade500)),
+                    )
+                  : SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: SingleChildScrollView(
+                        child: DataTable(
+                          columns: const [
+                            DataColumn(label: Text('Name')),
+                            DataColumn(label: Text('Phone')),
+                            DataColumn(label: Text('Email')),
+                            DataColumn(label: Text('License Number')),
+                            DataColumn(label: Text('Vehicle Details')),
+                            DataColumn(label: Text('Actions')),
+                          ],
+                          rows: drivers.map((driver) {
+                            return DataRow(cells: [
+                              DataCell(Text(driver.name)),
+                              DataCell(Text(driver.phone)),
+                              DataCell(Text(driver.email ?? 'N/A')),
+                              DataCell(Text(driver.licenseNumber ?? 'N/A')),
+                              DataCell(Text(driver.vehicleDetails ?? 'N/A')),
+                              DataCell(
+                                IconButton(
+                                  icon: const Icon(Icons.delete, color: Colors.red),
+                                  onPressed: () async {
+                                    final confirm = await showDialog<bool>(
+                                      context: context,
+                                      builder: (ctx) => AlertDialog(
+                                        title: const Text('Remove Driver?'),
+                                        content: const Text('Are you sure you want to remove this driver?'),
+                                        actions: [
+                                          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+                                          ElevatedButton(
+                                            style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+                                            onPressed: () => Navigator.pop(ctx, true),
+                                            child: const Text('Delete'),
+                                          ),
+                                        ],
+                                      ),
+                                    );
+                                    if (confirm == true) {
+                                      await FirestoreService.instance.deleteStaff(driver.uid);
+                                      _loadData();
+                                    }
+                                  },
+                                ),
+                              ),
+                            ]);
+                          }).toList(),
+                        ),
+                      ),
+                    ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildProfileTab() {
+    _initProfileFields();
+    if (_agencyTenant == null) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    return SingleChildScrollView(
+      child: Center(
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 600),
           child: Card(
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
             child: Padding(
-              padding: const EdgeInsets.all(24.0),
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Text('Manage Agency Profile', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20)),
+                  const SizedBox(height: 8),
+                  const Text('Update your agency details and customize the dashboard branding theme.', style: TextStyle(color: Colors.grey)),
+                  const SizedBox(height: 24),
+
+                  TextField(
+                    controller: _profileNameCtrl,
+                    decoration: const InputDecoration(labelText: 'Agency Name', border: OutlineInputBorder()),
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: _profileOwnerCtrl,
+                    decoration: const InputDecoration(labelText: 'Owner Name', border: OutlineInputBorder()),
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: _profileEmailCtrl,
+                    decoration: const InputDecoration(labelText: 'Email Address', border: OutlineInputBorder()),
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: _profilePhoneCtrl,
+                    decoration: const InputDecoration(labelText: 'Contact Phone Number', border: OutlineInputBorder()),
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: _profileLicenseCtrl,
+                    decoration: const InputDecoration(labelText: 'Business License Number', border: OutlineInputBorder()),
+                  ),
+                  const SizedBox(height: 20),
+
+                  // Color Selector
+                  DropdownButtonFormField<String>(
+                    value: _profileColorHex,
+                    decoration: const InputDecoration(labelText: 'Branding Theme Color', border: OutlineInputBorder()),
+                    items: const [
+                      DropdownMenuItem(value: '#3F51B5', child: Text('Indigo')),
+                      DropdownMenuItem(value: '#009688', child: Text('Teal')),
+                      DropdownMenuItem(value: '#E91E63', child: Text('Pink')),
+                      DropdownMenuItem(value: '#FF5722', child: Text('Orange')),
+                      DropdownMenuItem(value: '#4CAF50', child: Text('Green')),
+                      DropdownMenuItem(value: '#2196F3', child: Text('Blue')),
+                      DropdownMenuItem(value: '#9C27B0', child: Text('Purple')),
+                    ],
+                    onChanged: (val) {
+                      if (val != null) {
+                        setState(() {
+                          _profileColorHex = val;
+                        });
+                      }
+                    },
+                  ),
+                  const SizedBox(height: 32),
+
+                  SizedBox(
+                    height: 48,
+                    child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(backgroundColor: _primaryColor),
+                      onPressed: () async {
+                        final updated = _agencyTenant!.copyWith(
+                          name: _profileNameCtrl.text.trim(),
+                          ownerName: _profileOwnerCtrl.text.trim(),
+                          email: _profileEmailCtrl.text.trim(),
+                          phone: _profilePhoneCtrl.text.trim(),
+                          businessLicenseNo: _profileLicenseCtrl.text.trim(),
+                          themeColorHex: _profileColorHex,
+                        );
+
+                        await FirestoreService.instance.saveTenant(updated);
+
+                        if (mounted) {
+                          setState(() {
+                            _agencyTenant = updated;
+                          });
+
+                          // Dynamically update the app theme color
+                          final color = TenantThemeLoader.hexToColor(_profileColorHex);
+                          context.read<ThemeBloc>().add(ThemeLoadTenant(
+                            color: color,
+                            tenantName: updated.name,
+                          ));
+
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Profile and Theme Color saved successfully!')),
+                          );
+                        }
+                      },
+                      child: const Text('Save Profile & Theme Color', style: TextStyle(fontWeight: FontWeight.bold)),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showAddDriverDialog() {
+    final nameCtrl = TextEditingController();
+    final phoneCtrl = TextEditingController();
+    final emailCtrl = TextEditingController();
+    final licenseCtrl = TextEditingController();
+    final vehicleCtrl = TextEditingController();
+    final passwordCtrl = TextEditingController(text: '1234');
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          title: const Text('Add New Driver (નવો ડ્રાઇવર ઉમેરો)'),
+          content: SizedBox(
+            width: 400,
+            child: SingleChildScrollView(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: nameCtrl,
+                    decoration: const InputDecoration(labelText: 'Driver Name *', border: OutlineInputBorder()),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: phoneCtrl,
+                    keyboardType: TextInputType.phone,
+                    decoration: const InputDecoration(labelText: 'Mobile Number *', border: OutlineInputBorder()),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: emailCtrl,
+                    keyboardType: TextInputType.emailAddress,
+                    decoration: const InputDecoration(labelText: 'Email Address', border: OutlineInputBorder()),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: licenseCtrl,
+                    decoration: const InputDecoration(labelText: 'Driver License No. *', border: OutlineInputBorder()),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: vehicleCtrl,
+                    decoration: const InputDecoration(labelText: 'Vehicle Details (e.g. GJ-05-AB-1234) *', border: OutlineInputBorder()),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: passwordCtrl,
+                    decoration: const InputDecoration(labelText: 'PIN/Password (4 digits) *', border: OutlineInputBorder()),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+            ElevatedButton(
+              onPressed: () async {
+                if (nameCtrl.text.trim().isEmpty || phoneCtrl.text.trim().isEmpty || licenseCtrl.text.trim().isEmpty || vehicleCtrl.text.trim().isEmpty) return;
+
+                final driverId = 'S${DateTime.now().millisecondsSinceEpoch % 100000}';
+                final driver = UserStaff(
+                  uid: driverId,
+                  name: nameCtrl.text.trim(),
+                  phone: phoneCtrl.text.trim(),
+                  role: UserRole.driver,
+                  tenantId: _tenantId,
+                  email: emailCtrl.text.trim(),
+                  licenseNumber: licenseCtrl.text.trim(),
+                  vehicleDetails: vehicleCtrl.text.trim(),
+                  status: 'approved',
+                );
+
+                await FirestoreService.instance.saveStaffWithPin(driver, passwordCtrl.text.trim());
+                if (ctx.mounted) Navigator.pop(ctx);
+                _loadData();
+              },
+              child: const Text('Save Driver'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showAddBusDialog() {
+    final numberCtrl = TextEditingController();
+    final seatsCtrl = TextEditingController(text: '36');
+    var layout = BusLayoutType.sleeper;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          title: const Text('Add New Bus'),
+          content: SizedBox(
+            width: 400,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: numberCtrl,
+                  decoration: const InputDecoration(labelText: 'Number Plate (GJ-05-XX-XXXX)'),
+                ),
+                TextField(
+                  controller: seatsCtrl,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(labelText: 'Total Seats'),
+                ),
+                DropdownButtonFormField<BusLayoutType>(
+                  value: layout,
+                  decoration: const InputDecoration(labelText: 'Layout Type'),
+                  items: BusLayoutType.values
+                      .map((l) => DropdownMenuItem(value: l, child: Text(l.name)))
+                      .toList(),
+                  onChanged: (v) => setDialogState(() => layout = v ?? BusLayoutType.sleeper),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+            ElevatedButton(
+              onPressed: () async {
+                final bus = Bus(
+                  id: 'B${DateTime.now().millisecondsSinceEpoch % 10000}',
+                  busNumber: numberCtrl.text.trim(),
+                  tenantId: _tenantId,
+                  totalSeats: int.tryParse(seatsCtrl.text) ?? 36,
+                  layoutType: layout,
+                );
+                await FirestoreService.instance.addBus(bus);
+                if (ctx.mounted) Navigator.pop(ctx);
+                _loadData();
+              },
+              child: const Text('Save Bus'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showScheduleTripDialog() {
+    String? busId = _buses.isNotEmpty ? _buses.first.id : null;
+    String? driverId = _staff.where((s) => s.role == UserRole.driver).map((s) => s.uid).firstOrNull;
+    String? conductorId = _staff.where((s) => s.role == UserRole.conductor).map((s) => s.uid).firstOrNull;
+    var status = TripStatus.scheduled;
+
+    final drivers = _staff.where((s) => s.role == UserRole.driver).toList();
+    final conductors = _staff.where((s) => s.role == UserRole.conductor).toList();
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          title: const Text('Schedule Trip & Assign Crew'),
+          content: SizedBox(
+            width: 400,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                DropdownButtonFormField<String>(
+                  value: busId,
+                  decoration: const InputDecoration(labelText: 'Select Bus'),
+                  items: _buses.map((b) => DropdownMenuItem(value: b.id, child: Text(b.busNumber))).toList(),
+                  onChanged: (v) => setDialogState(() => busId = v),
+                ),
+                DropdownButtonFormField<String>(
+                  value: driverId,
+                  decoration: const InputDecoration(labelText: 'Assign Driver'),
+                  items: drivers.map((d) => DropdownMenuItem(value: d.uid, child: Text(d.name))).toList(),
+                  onChanged: (v) => setDialogState(() => driverId = v),
+                ),
+                DropdownButtonFormField<String>(
+                  value: conductorId,
+                  decoration: const InputDecoration(labelText: 'Assign Conductor'),
+                  items: conductors.map((c) => DropdownMenuItem(value: c.uid, child: Text(c.name))).toList(),
+                  onChanged: (v) => setDialogState(() => conductorId = v),
+                ),
+                DropdownButtonFormField<TripStatus>(
+                  value: status,
+                  decoration: const InputDecoration(labelText: 'Trip Status'),
+                  items: TripStatus.values
+                      .map((s) => DropdownMenuItem(value: s, child: Text(s.name)))
+                      .toList(),
+                  onChanged: (v) => setDialogState(() => status = v ?? TripStatus.scheduled),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+            ElevatedButton(
+              onPressed: () async {
+                if (busId == null || driverId == null) return;
+                final trip = Trip(
+                  id: 'TR${DateTime.now().millisecondsSinceEpoch % 10000}',
+                  tenantId: _tenantId,
+                  busId: busId!,
+                  driverId: driverId!,
+                  conductorId: conductorId ?? '',
+                  routeId: 'RT001',
+                  status: status,
+                  startDateTime: DateTime.now(),
+                );
+                await FirestoreService.instance.addTrip(trip);
+                if (ctx.mounted) Navigator.pop(ctx);
+                _loadData();
+              },
+              child: const Text('Schedule Trip'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBookTicketTab() {
+    return Center(
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 800),
+        child: SingleChildScrollView(
+          child: Card(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const Text('Generate Ticket / QR Code', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20)),
                   const SizedBox(height: 8),
-                  const Text('Book ticket dynamically and dispatch hash coordinates.', style: TextStyle(color: Colors.grey, fontSize: 13)),
+                  const Text('Book ticket with boarding/drop points and generate tracking QR.', style: TextStyle(color: Colors.grey)),
                   const SizedBox(height: 24),
-                  TicketBookingForm(
-                    tenantId: 'T1',
-                    themeColor: _primaryColor,
-                  ),
+                  TicketBookingForm(tenantId: _tenantId, themeColor: _primaryColor, onTicketBooked: _loadData),
                 ],
               ),
             ),

@@ -6,7 +6,9 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'dart:io' show Platform;
-import 'passenger_scan_screen.dart'; // import scanner overlay shapes
+import 'package:bus_service/core/config/app_config.dart';
+import 'package:bus_service/core/services/firestore_service.dart';
+import 'passenger_scan_screen.dart';
 
 class DriverValidatorScreen extends StatefulWidget {
   final String tripId;
@@ -49,16 +51,24 @@ class _DriverValidatorScreenState extends State<DriverValidatorScreen> {
     });
 
     try {
-      // 1. Parse payload
-      final Map<String, dynamic> payload;
-      try {
-        payload = jsonDecode(rawData) as Map<String, dynamic>;
-      } catch (_) {
-        throw const FormatException('ખોટી ટિકિટ!');
-      }
+      String? ticketId;
+      String? tripId;
 
-      final ticketId = payload['ticketId'] as String?;
-      final tripId = payload['tripId'] as String?;
+      final urlTicketId = AppConfig.ticketIdFromUrl(rawData);
+      if (urlTicketId != null) {
+        ticketId = urlTicketId;
+        if (!_isTesting) {
+          final ticket = await FirestoreService.instance.getTicket(ticketId);
+          if (ticket == null) throw Exception('ખોટી ટિકિટ!');
+          tripId = ticket.tripId;
+        } else {
+          tripId = widget.tripId;
+        }
+      } else {
+        final payload = jsonDecode(rawData) as Map<String, dynamic>;
+        ticketId = payload['ticketId'] as String?;
+        tripId = payload['tripId'] as String?;
+      }
 
       if (ticketId == null || tripId == null) {
         throw const FormatException('ખોટી ટિકિટ!');

@@ -5,6 +5,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:bus_service/firebase_options.dart';
+import 'package:bus_service/core/services/firestore_service.dart';
 
 /// A production-ready background location tracking service for the Driver's role.
 ///
@@ -181,20 +182,29 @@ void onStart(ServiceInstance service) async {
             ),
           );
 
-          // Update Firebase Realtime Database
           final dbRef = FirebaseDatabase.instance
               .ref('trips/$activeTripId/currentLocation');
 
-          await dbRef.set({
+          final locationData = {
             'latitude': position.latitude,
             'longitude': position.longitude,
-            'lat': position.latitude, // backward compatibility
-            'lng': position.longitude, // backward compatibility
+            'lat': position.latitude,
+            'lng': position.longitude,
             'lastUpdated': DateTime.now().toIso8601String(),
-          });
+          };
+
+          try {
+            await dbRef.set(locationData);
+            await OfflineLocationQueue.instance.syncPending();
+          } catch (_) {
+            await OfflineLocationQueue.instance.enqueue(
+              tripId: activeTripId!,
+              lat: position.latitude,
+              lng: position.longitude,
+            );
+          }
         } catch (_) {
-          // Catch exceptions to ensure temporary connection drops or GPS timeouts
-          // don't crash the background tracking loop.
+          // GPS timeout — skip this cycle
         }
       });
     }

@@ -2,9 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:bus_service/core/models/user_staff.dart';
 import 'package:bus_service/core/blocs/auth_bloc.dart';
+import 'package:bus_service/core/models/auth_session.dart';
 import 'stub_screens.dart';
+import 'package:bus_service/features/auth/presentation/admin_screens.dart';
 import 'package:bus_service/features/ticket_verification/presentation/passenger_scan_screen.dart';
 import 'package:bus_service/features/ticket_verification/presentation/driver_validator_screen.dart';
+import 'package:bus_service/features/driver/presentation/passenger_chart_screen.dart';
 import 'package:bus_service/web_panels/agency_dashboard/presentation/agency_dashboard_screen.dart';
 import 'dart:async';
 
@@ -14,36 +17,55 @@ import 'dart:async';
 class MockAuthService extends ChangeNotifier {
   bool _isAuthenticated = false;
   UserRole? _role;
+  AuthUserSession? _session;
   StreamSubscription? _subscription;
 
   bool get isAuthenticated => _isAuthenticated;
   UserRole? get role => _role;
+  AuthUserSession? get session => _session;
 
-  /// Binds this service listener to the AuthBloc state stream.
   void bindBloc(AuthBloc bloc) {
     _subscription?.cancel();
     _isAuthenticated = bloc.state.isAuthenticated;
     _role = bloc.state.role;
-    
+    _session = bloc.state.session;
+
     _subscription = bloc.stream.listen((state) {
       _isAuthenticated = state.isAuthenticated;
       _role = state.role;
+      _session = state.session;
       notifyListeners();
     });
   }
 
-  /// Authenticates the user with a specific [UserRole] role.
-  void login(UserRole role) {
-    _isAuthenticated = true;
-    _role = role;
-    notifyListeners();
+  /// Test helper — logs in with a minimal session for the given role.
+  void login(UserRole role, {AuthBloc? bloc}) {
+    final session = AuthUserSession(
+      uid: 'test-${role.name}',
+      name: 'Test ${role.name}',
+      phone: '9999999999',
+      role: role,
+      tenantId: role == UserRole.admin ? '' : 'T1',
+    );
+    if (bloc != null) {
+      bloc.add(AuthLoginRequested(session));
+    } else {
+      _isAuthenticated = true;
+      _role = role;
+      _session = session;
+      notifyListeners();
+    }
   }
 
-  /// Logs out the user.
-  void logout() {
-    _isAuthenticated = false;
-    _role = null;
-    notifyListeners();
+  void logout({AuthBloc? bloc}) {
+    if (bloc != null) {
+      bloc.add(AuthLogoutRequested());
+    } else {
+      _isAuthenticated = false;
+      _role = null;
+      _session = null;
+      notifyListeners();
+    }
   }
 
   @override
@@ -105,6 +127,15 @@ class AppRouter {
         },
       ),
 
+      // Public tracking URL (mytravels.com/track/TICK-1042)
+      GoRoute(
+        path: '/track/:ticketHash',
+        redirect: (context, state) {
+          final hash = state.pathParameters['ticketHash'] ?? '';
+          return '/passenger/trip-details/$hash';
+        },
+      ),
+
       // 4. Super Admin Web Routes
       GoRoute(
         path: '/admin/login',
@@ -158,6 +189,13 @@ class AppRouter {
           return DriverValidatorScreen(tripId: tripId);
         },
       ),
+      GoRoute(
+        path: '/driver/chart/:tripId',
+        builder: (context, state) {
+          final tripId = state.pathParameters['tripId'] ?? '';
+          return PassengerChartScreen(tripId: tripId);
+        },
+      ),
     ],
   );
 
@@ -167,7 +205,9 @@ class AppRouter {
 
     final isAdminPath = path.startsWith('/admin/dashboard');
     final isAgencyPath = path.startsWith('/agency/dashboard');
-    final isDriverPath = path.startsWith('/driver/home') || path.startsWith('/driver/verify');
+    final isDriverPath = path.startsWith('/driver/home') ||
+        path.startsWith('/driver/verify') ||
+        path.startsWith('/driver/chart');
 
     // 1. Guard Super Admin Routes
     if (isAdminPath) {
@@ -187,7 +227,8 @@ class AppRouter {
 
     // 3. Guard Driver Routes
     if (isDriverPath) {
-      if (!authService.isAuthenticated || authService.role != UserRole.driver) {
+      if (!authService.isAuthenticated ||
+          (authService.role != UserRole.driver && authService.role != UserRole.conductor)) {
         return '/driver/login';
       }
     }
@@ -200,7 +241,9 @@ class AppRouter {
         (authService.role == UserRole.agent || authService.role == UserRole.admin)) {
       return '/agency/dashboard';
     }
-    if (path == '/driver/login' && authService.isAuthenticated && authService.role == UserRole.driver) {
+    if (path == '/driver/login' &&
+        authService.isAuthenticated &&
+        (authService.role == UserRole.driver || authService.role == UserRole.conductor)) {
       return '/driver/home';
     }
 

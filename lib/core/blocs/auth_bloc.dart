@@ -1,35 +1,71 @@
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:bus_service/core/models/auth_session.dart';
 import 'package:bus_service/core/models/user_staff.dart';
+import 'package:bus_service/core/services/auth_service.dart';
 
-// Events
 abstract class AuthEvent {}
 
 class AuthLoginRequested extends AuthEvent {
-  final UserRole role;
-  AuthLoginRequested(this.role);
+  final AuthUserSession session;
+  AuthLoginRequested(this.session);
 }
 
 class AuthLogoutRequested extends AuthEvent {}
 
-// State
 class AuthState {
   final bool isAuthenticated;
-  final UserRole? role;
+  final AuthUserSession? session;
 
-  AuthState({required this.isAuthenticated, this.role});
+  const AuthState({required this.isAuthenticated, this.session});
 
-  factory AuthState.initial() => AuthState(isAuthenticated: false, role: null);
+  UserRole? get role => session?.role;
+  String? get tenantId => session?.tenantId;
+  String? get userId => session?.uid;
+  String? get userName => session?.name;
+
+  factory AuthState.initial() => const AuthState(isAuthenticated: false, session: null);
 }
 
-// BLoC
 class AuthBloc extends Bloc<AuthEvent, AuthState> {
   AuthBloc() : super(AuthState.initial()) {
     on<AuthLoginRequested>((event, emit) {
-      emit(AuthState(isAuthenticated: true, role: event.role));
+      emit(AuthState(isAuthenticated: true, session: event.session));
     });
 
     on<AuthLogoutRequested>((event, emit) {
-      emit(AuthState(isAuthenticated: false, role: null));
+      emit(AuthState.initial());
     });
   }
+
+  /// Convenience for login screens.
+  Future<String?> loginWithCredentials({
+    required String phone,
+    required String pin,
+    UserRole? expectedRole,
+  }) async {
+    try {
+      final session = await AuthService.instance.login(
+        phone: phone,
+        pin: pin,
+        expectedRole: expectedRole,
+      );
+      if (session == null) return 'ખોટો મોબાઇલ નંબર અથવા PIN';
+      if (expectedRole != null && session.role != expectedRole) {
+        return 'આ લોગિન ${_roleLabel(expectedRole)} માટે નથી';
+      }
+      add(AuthLoginRequested(session));
+      return null;
+    } on AuthException catch (e) {
+      return e.message;
+    } catch (e) {
+      return 'લોગિન નિષ્ફળ ગયું: ${e.toString()}';
+    }
+  }
+
+  String _roleLabel(UserRole role) => switch (role) {
+        UserRole.admin => 'Admin',
+        UserRole.agent => 'Agency',
+        UserRole.driver => 'Driver',
+        UserRole.conductor => 'Conductor',
+      };
 }

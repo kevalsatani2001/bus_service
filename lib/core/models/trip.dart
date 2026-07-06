@@ -89,6 +89,7 @@ class Trip {
   final String tenantId;
   final String busId;
   final String driverId;
+  final String conductorId;
   final String routeId;
   final TripStatus status;
   final DateTime startDateTime;
@@ -99,6 +100,7 @@ class Trip {
     required this.tenantId,
     required this.busId,
     required this.driverId,
+    this.conductorId = '',
     required this.routeId,
     required this.status,
     required this.startDateTime,
@@ -111,6 +113,7 @@ class Trip {
     String? tenantId,
     String? busId,
     String? driverId,
+    String? conductorId,
     String? routeId,
     TripStatus? status,
     DateTime? startDateTime,
@@ -121,6 +124,7 @@ class Trip {
       tenantId: tenantId ?? this.tenantId,
       busId: busId ?? this.busId,
       driverId: driverId ?? this.driverId,
+      conductorId: conductorId ?? this.conductorId,
       routeId: routeId ?? this.routeId,
       status: status ?? this.status,
       startDateTime: startDateTime ?? this.startDateTime,
@@ -136,6 +140,7 @@ class Trip {
       tenantId: json['tenantId'] as String? ?? '',
       busId: json['busId'] as String? ?? '',
       driverId: json['driverId'] as String? ?? '',
+      conductorId: json['conductorId'] as String? ?? '',
       routeId: json['routeId'] as String? ?? '',
       status: TripStatus.fromString(json['status'] as String? ?? ''),
       startDateTime: parseDateTime(json['startDateTime']) ?? DateTime.now(),
@@ -150,6 +155,7 @@ class Trip {
       'tenantId': tenantId,
       'busId': busId,
       'driverId': driverId,
+      'conductorId': conductorId,
       'routeId': routeId,
       'status': status.toJson(),
       'startDateTime': startDateTime.toIso8601String(),
@@ -165,6 +171,7 @@ class Trip {
         other.tenantId == tenantId &&
         other.busId == busId &&
         other.driverId == driverId &&
+        other.conductorId == conductorId &&
         other.routeId == routeId &&
         other.status == status &&
         other.startDateTime == startDateTime &&
@@ -178,6 +185,7 @@ class Trip {
       tenantId,
       busId,
       driverId,
+      conductorId,
       routeId,
       status,
       startDateTime,
@@ -187,6 +195,6 @@ class Trip {
 
   @override
   String toString() {
-    return 'Trip(id: $id, tenantId: $tenantId, busId: $busId, driverId: $driverId, routeId: $routeId, status: $status, startDateTime: $startDateTime, currentLocation: $currentLocation)';
+    return 'Trip(id: $id, tenantId: $tenantId, busId: $busId, driverId: $driverId, conductorId: $conductorId, routeId: $routeId, status: $status, startDateTime: $startDateTime, currentLocation: $currentLocation)';
   }
 }

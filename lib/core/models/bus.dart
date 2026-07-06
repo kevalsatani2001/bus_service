@@ -23,6 +23,9 @@ class Bus {
   final String tenantId;
   final int totalSeats;
   final BusLayoutType layoutType;
+  final String exteriorPhotoUrl;
+  final String interiorPhotoUrl;
+  final List<String> berthPhotoUrls;
 
   const Bus({
     required this.id,
@@ -30,6 +33,9 @@ class Bus {
     required this.tenantId,
     required this.totalSeats,
     required this.layoutType,
+    this.exteriorPhotoUrl = '',
+    this.interiorPhotoUrl = '',
+    this.berthPhotoUrls = const [],
   });
 
   /// Returns a new [Bus] instance with optionally modified fields.
@@ -39,6 +45,9 @@ class Bus {
     String? tenantId,
     int? totalSeats,
     BusLayoutType? layoutType,
+    String? exteriorPhotoUrl,
+    String? interiorPhotoUrl,
+    List<String>? berthPhotoUrls,
   }) {
     return Bus(
       id: id ?? this.id,
@@ -46,6 +55,9 @@ class Bus {
       tenantId: tenantId ?? this.tenantId,
       totalSeats: totalSeats ?? this.totalSeats,
       layoutType: layoutType ?? this.layoutType,
+      exteriorPhotoUrl: exteriorPhotoUrl ?? this.exteriorPhotoUrl,
+      interiorPhotoUrl: interiorPhotoUrl ?? this.interiorPhotoUrl,
+      berthPhotoUrls: berthPhotoUrls ?? this.berthPhotoUrls,
     );
   }
 
@@ -57,6 +69,11 @@ class Bus {
       tenantId: json['tenantId'] as String? ?? '',
       totalSeats: json['totalSeats'] as int? ?? 0,
       layoutType: BusLayoutType.fromString(json['layoutType'] as String? ?? ''),
+      exteriorPhotoUrl: json['exteriorPhotoUrl'] as String? ?? '',
+      interiorPhotoUrl: json['interiorPhotoUrl'] as String? ?? '',
+      berthPhotoUrls: (json['berthPhotoUrls'] as List<dynamic>? ?? [])
+          .map((e) => e.toString())
+          .toList(),
     );
   }
 
@@ -68,6 +85,9 @@ class Bus {
       'tenantId': tenantId,
       'totalSeats': totalSeats,
       'layoutType': layoutType.toJson(),
+      'exteriorPhotoUrl': exteriorPhotoUrl,
+      'interiorPhotoUrl': interiorPhotoUrl,
+      'berthPhotoUrls': berthPhotoUrls,
     };
   }
 

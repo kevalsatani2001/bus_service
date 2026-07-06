@@ -7,6 +7,8 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'dart:io' show Platform;
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:bus_service/core/blocs/theme_bloc.dart';
+import 'package:bus_service/core/config/app_config.dart';
+import 'package:bus_service/core/services/firestore_service.dart';
 
 class PassengerScanScreen extends StatefulWidget {
   const PassengerScanScreen({super.key});
@@ -48,14 +50,28 @@ class _PassengerScanScreenState extends State<PassengerScanScreen> {
     });
 
     try {
-      // 1. Parse JSON payload
-      final payload = jsonDecode(rawData) as Map<String, dynamic>;
-      final tenantId = payload['tenantId'] as String?;
-      final tripId = payload['tripId'] as String?;
-      final ticketId = payload['ticketId'] as String?;
+      String? ticketId;
+      String? tenantId;
 
-      if (tenantId == null || tripId == null || ticketId == null) {
-        throw const FormatException('Invalid QR code JSON payload structure');
+      // Support public tracking URL QR (mytravels.com/track/TICK-1042)
+      final urlTicketId = AppConfig.ticketIdFromUrl(rawData);
+      if (urlTicketId != null) {
+        ticketId = urlTicketId;
+        if (!_isTesting) {
+          final ticket = await FirestoreService.instance.getTicket(ticketId);
+          tenantId = ticket?.tenantId ?? 'T1';
+        } else {
+          tenantId = 'T1';
+        }
+      } else {
+        // Legacy JSON payload
+        final payload = jsonDecode(rawData) as Map<String, dynamic>;
+        tenantId = payload['tenantId'] as String?;
+        ticketId = payload['ticketId'] as String?;
+      }
+
+      if (tenantId == null || ticketId == null) {
+        throw const FormatException('Invalid QR code payload structure');
       }
 
       // 2. Fetch Tenant branding configs from Firestore

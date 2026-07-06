@@ -1,13 +1,13 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'dart:io' show Platform;
-import 'package:crypto/crypto.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'printer.dart';
+import 'package:bus_service/core/config/app_config.dart';
 import 'package:bus_service/core/models/models.dart';
+import 'package:bus_service/core/services/firestore_service.dart';
+import 'package:bus_service/core/services/seed_data_service.dart';
 import 'package:bus_service/features/seat_layout/widgets/sleeper_layout.dart';
 
 class TicketBookingForm extends StatefulWidget {
@@ -33,13 +33,17 @@ class _TicketBookingFormState extends State<TicketBookingForm> {
 
   String? _selectedTripId;
   String? _selectedSeatNumber;
+  String? _selectedBoarding;
+  String? _selectedDrop;
+  List<Trip> _trips = [];
+  List<String> _bookedSeats = [];
+  bool _loadingTrips = true;
 
-  // List of mock booked seats for the selected trips
-  final Map<String, List<String>> _bookedSeatsPerTrip = {
-    'TR001': ['L1', 'L3', 'U5', 'U12'],
-    'TR002': ['L2', 'L7', 'L10', 'U1', 'U8'],
-    'TR003': ['L4', 'L9', 'U15'],
-  };
+  @override
+  void initState() {
+    super.initState();
+    _loadTrips();
+  }
 
   @override
   void dispose() {
@@ -49,37 +53,55 @@ class _TicketBookingFormState extends State<TicketBookingForm> {
   }
 
   Color get _primaryColor => widget.themeColor ?? Colors.indigo;
-
   bool get _isTesting => !kIsWeb && Platform.environment.containsKey('FLUTTER_TEST');
+
+  Future<void> _loadTrips() async {
+    final trips = await FirestoreService.instance.getTrips(widget.tenantId);
+    if (mounted) {
+      setState(() {
+        _trips = trips;
+        _loadingTrips = false;
+      });
+    }
+  }
+
+  Future<void> _loadBookedSeats(String tripId) async {
+    final seats = await FirestoreService.instance.getBookedSeats(tripId);
+    if (mounted) setState(() => _bookedSeats = seats);
+  }
+
+  String _tripLabel(Trip trip) {
+    final route = trip.routeId == 'RT001' ? 'સુરત - બારડોલી - વ્યારા' : trip.routeId;
+    final status = trip.status == TripStatus.live ? 'Live' : trip.status.name;
+    return '$route ($status)';
+  }
 
   Future<void> _submitForm() async {
     if (!_formKey.currentState!.validate()) return;
 
     if (_selectedTripId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please select a trip')),
-      );
+      _showSnack('Please select a trip');
       return;
     }
-
     if (_selectedSeatNumber == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please select a sleeper seat')),
-      );
+      _showSnack('Please select a sleeper seat');
+      return;
+    }
+    if (_selectedBoarding == null) {
+      _showSnack('Please select boarding point');
+      return;
+    }
+    if (_selectedDrop == null) {
+      _showSnack('Please select drop point');
       return;
     }
 
     try {
-      // Generate a unique ticketId hash using SHA-256 of the JSON containing tenantId, tripId, and seatNumber
-      final Map<String, String> payload = {
-        'tenantId': widget.tenantId,
-        'tripId': _selectedTripId!,
-        'seatNumber': _selectedSeatNumber!,
-      };
-      final String jsonStr = jsonEncode(payload);
-      final List<int> bytes = utf8.encode(jsonStr);
-      final Digest digest = sha256.convert(bytes);
-      final String ticketId = digest.toString();
+      final ticketId = _isTesting
+          ? 'TICK-${DateTime.now().millisecondsSinceEpoch % 100000}'
+          : await FirestoreService.instance.generateTicketId();
+
+      final trackingUrl = AppConfig.trackingUrl(ticketId);
 
       final ticket = Ticket(
         id: ticketId,
@@ -88,51 +110,77 @@ class _TicketBookingFormState extends State<TicketBookingForm> {
         passengerName: _nameController.text.trim(),
         passengerPhone: _phoneController.text.trim(),
         seatNumber: _selectedSeatNumber!,
+        boardingPoint: _selectedBoarding!,
+        dropPoint: _selectedDrop!,
         qrHash: ticketId,
+        trackingUrl: trackingUrl,
         isScanned: false,
         bookedAt: DateTime.now(),
       );
 
-      // Save to Cloud Firestore (safeguarded in test environments)
       if (!_isTesting) {
-        await FirebaseFirestore.instance
-            .collection('tickets')
-            .doc(ticketId)
-            .set(ticket.toJson());
+        await FirestoreService.instance.saveTicket(ticket);
       }
 
-      // Trigger success callback if provided
       widget.onTicketBooked?.call();
 
-      // Clear the form fields
+      final bookedSeat = _selectedSeatNumber!;
+      final tripId = _selectedTripId!;
+      final passengerName = _nameController.text.trim();
+      final passengerPhone = _phoneController.text.trim();
+      final boarding = _selectedBoarding!;
+      final drop = _selectedDrop!;
+
       _nameController.clear();
       _phoneController.clear();
-      final bookedSeat = _selectedSeatNumber;
-      final tripId = _selectedTripId;
-      
       setState(() {
         _selectedSeatNumber = null;
+        _selectedBoarding = null;
+        _selectedDrop = null;
       });
 
-      // Show Success Modal Dialog with QR Code
       if (mounted) {
-        _showSuccessModal(ticketId, tripId!, bookedSeat!);
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to book ticket: $e')),
+        _showSuccessModal(
+          ticketId: ticketId,
+          tripId: tripId,
+          seatNo: bookedSeat,
+          trackingUrl: trackingUrl,
+          passengerName: passengerName,
+          passengerPhone: passengerPhone,
+          boarding: boarding,
+          drop: drop,
         );
       }
+    } catch (e) {
+      if (mounted) _showSnack('Failed to book ticket: $e');
     }
   }
 
-  void _showSuccessModal(String ticketId, String tripId, String seatNo) {
-    final qrPayload = jsonEncode({
-      'tenantId': widget.tenantId,
-      'tripId': tripId,
-      'ticketId': ticketId,
-    });
+  void _showSnack(String msg) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  }
+
+  void _showSuccessModal({
+    required String ticketId,
+    required String tripId,
+    required String seatNo,
+    required String trackingUrl,
+    required String passengerName,
+    required String passengerPhone,
+    required String boarding,
+    required String drop,
+  }) {
+    final printData = TicketPrintData(
+      ticketId: ticketId,
+      passengerName: passengerName,
+      passengerPhone: passengerPhone,
+      seatNumber: seatNo,
+      tripId: tripId,
+      boardingPoint: boarding,
+      dropPoint: drop,
+      trackingUrl: trackingUrl,
+      qrData: trackingUrl,
+    );
 
     showDialog(
       context: context,
@@ -146,13 +194,9 @@ class _TicketBookingFormState extends State<TicketBookingForm> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                // Green verify check indicator
                 Container(
                   padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Colors.green.shade50,
-                    shape: BoxShape.circle,
-                  ),
+                  decoration: BoxDecoration(color: Colors.green.shade50, shape: BoxShape.circle),
                   child: const Icon(Icons.check_circle, color: Colors.green, size: 48),
                 ),
                 const SizedBox(height: 16),
@@ -162,14 +206,8 @@ class _TicketBookingFormState extends State<TicketBookingForm> {
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 8),
-                Text(
-                  'Ticket ID: $ticketId',
-                  style: TextStyle(color: Colors.grey.shade500, fontSize: 12),
-                  textAlign: TextAlign.center,
-                ),
+                Text(ticketId, style: TextStyle(color: Colors.grey.shade500, fontSize: 12)),
                 const SizedBox(height: 24),
-                
-                // High-resolution QR Code
                 Container(
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
@@ -178,16 +216,18 @@ class _TicketBookingFormState extends State<TicketBookingForm> {
                     border: Border.all(color: Colors.grey.shade200),
                   ),
                   child: QrImageView(
-                    data: qrPayload,
+                    data: trackingUrl,
                     version: QrVersions.auto,
                     size: 180.0,
-                    gapless: false,
                   ),
                 ),
-                
-                const SizedBox(height: 20),
-                
-                // Details Card
+                const SizedBox(height: 12),
+                SelectableText(
+                  trackingUrl,
+                  style: TextStyle(color: _primaryColor, fontSize: 11),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 16),
                 Container(
                   width: double.infinity,
                   padding: const EdgeInsets.all(16),
@@ -195,95 +235,44 @@ class _TicketBookingFormState extends State<TicketBookingForm> {
                     color: _primaryColor.withOpacity(0.05),
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceAround,
+                  child: Column(
                     children: [
-                      Column(
-                        children: [
-                          const Text('SEAT', style: TextStyle(color: Colors.grey, fontSize: 10, fontWeight: FontWeight.bold)),
-                          const SizedBox(height: 4),
-                          Text(seatNo, style: TextStyle(color: _primaryColor, fontSize: 16, fontWeight: FontWeight.bold)),
-                        ],
-                      ),
-                      Column(
-                        children: [
-                          const Text('TRIP', style: TextStyle(color: Colors.grey, fontSize: 10, fontWeight: FontWeight.bold)),
-                          const SizedBox(height: 4),
-                          Text(tripId, style: TextStyle(color: _primaryColor, fontSize: 16, fontWeight: FontWeight.bold)),
-                        ],
-                      ),
+                      _detailRow('Seat', seatNo),
+                      _detailRow('Trip', tripId),
+                      _detailRow('Boarding', boarding),
+                      _detailRow('Drop', drop),
                     ],
                   ),
                 ),
-                
                 const SizedBox(height: 24),
-                
-                // Action Buttons Row
                 Row(
                   children: [
                     Expanded(
                       child: OutlinedButton.icon(
-                        style: OutlinedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                        ),
                         icon: const Icon(Icons.print_outlined, size: 18),
                         label: const Text('Print Ticket', style: TextStyle(fontSize: 12)),
-                        onPressed: () {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('Printing ticket...')),
-                          );
-                          printTicket();
-                        },
+                        onPressed: () => printTicket(printData),
                       ),
                     ),
                     const SizedBox(width: 12),
                     Expanded(
                       child: OutlinedButton.icon(
-                        style: OutlinedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                        ),
                         icon: const Icon(Icons.share_outlined, size: 18),
                         label: const Text('Share to WA', style: TextStyle(fontSize: 12)),
-                        onPressed: () async {
-                          final String rawPhone = _phoneController.text.trim();
-                          final String formattedPhone = rawPhone.replaceAll('+', '').replaceAll(' ', '').replaceAll('-', '');
-                          final String messageText = 
-                              'નમસ્કાર! તમારી બસની ટિકિટ સફળતાપૂર્વક બુક થઈ ગઈ છે.\n'
-                              'ટિકિટ ID (Hash): $ticketId\n'
-                              'સીટ નંબર: $seatNo\n'
-                              'ટ્રિપ ID: $tripId\n'
-                              'લોકેશન ટ્રેક કરવા માટે અહીં ક્લિક કરો: https://bus-service-saas.web.app/passenger/trip-details/$ticketId';
-                          
-                          final String whatsappUrl = 'https://wa.me/$formattedPhone?text=${Uri.encodeComponent(messageText)}';
-                          final Uri uri = Uri.parse(whatsappUrl);
-                          
-                          try {
-                            if (await canLaunchUrl(uri)) {
-                              await launchUrl(uri, mode: LaunchMode.externalApplication);
-                            } else {
-                              if (context.mounted) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(content: Text('Could not launch WhatsApp.')),
-                                );
-                              }
-                            }
-                          } catch (_) {
-                            if (context.mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('Failed to trigger sharing action.')),
-                              );
-                            }
-                          }
-                        },
+                        onPressed: () => _shareWhatsApp(
+                          phone: passengerPhone,
+                          ticketId: ticketId,
+                          seatNo: seatNo,
+                          tripId: tripId,
+                          trackingUrl: trackingUrl,
+                          boarding: boarding,
+                          drop: drop,
+                        ),
                       ),
                     ),
                   ],
                 ),
                 const SizedBox(height: 12),
-                
-                // Close Modal button
                 TextButton(
                   onPressed: () => Navigator.of(context).pop(),
                   child: const Text('Dismiss', style: TextStyle(fontWeight: FontWeight.bold)),
@@ -296,14 +285,53 @@ class _TicketBookingFormState extends State<TicketBookingForm> {
     );
   }
 
+  Widget _detailRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label, style: const TextStyle(color: Colors.grey, fontSize: 12)),
+          Text(value, style: TextStyle(color: _primaryColor, fontWeight: FontWeight.bold, fontSize: 13)),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _shareWhatsApp({
+    required String phone,
+    required String ticketId,
+    required String seatNo,
+    required String tripId,
+    required String trackingUrl,
+    required String boarding,
+    required String drop,
+  }) async {
+    final formattedPhone = phone.replaceAll(RegExp(r'[^0-9]'), '');
+    final message =
+        'નમસ્કાર! તમારી બસની ટિકિટ સફળતાપૂર્વક બુક થઈ ગઈ છે.\n'
+        'ટિકિટ ID: $ticketId\n'
+        'સીટ: $seatNo | ટ્રિપ: $tripId\n'
+        'બેસવાનું: $boarding\n'
+        'ઉતરવાનું: $drop\n'
+        'લાઇવ ટ્રેકિંગ: $trackingUrl';
+
+    final uri = Uri.parse('https://wa.me/$formattedPhone?text=${Uri.encodeComponent(message)}');
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final boardingPoints = SeedDataService.boardingPoints;
+    final dropPoints = SeedDataService.dropPoints;
+
     return Form(
       key: _formKey,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Row of fields for details
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -311,16 +339,11 @@ class _TicketBookingFormState extends State<TicketBookingForm> {
                 child: TextFormField(
                   controller: _nameController,
                   decoration: const InputDecoration(
-                    labelText: 'Passenger Name',
+                    labelText: 'Passenger Name (પેસેન્જર નામ)',
                     prefixIcon: Icon(Icons.person_outline),
                     border: OutlineInputBorder(),
                   ),
-                  validator: (value) {
-                    if (value == null || value.trim().isEmpty) {
-                      return 'Please enter passenger name';
-                    }
-                    return null;
-                  },
+                  validator: (v) => (v == null || v.trim().isEmpty) ? 'Please enter passenger name' : null,
                 ),
               ),
               const SizedBox(width: 16),
@@ -329,53 +352,79 @@ class _TicketBookingFormState extends State<TicketBookingForm> {
                   controller: _phoneController,
                   keyboardType: TextInputType.phone,
                   decoration: const InputDecoration(
-                    labelText: 'Phone Number',
+                    labelText: 'Phone Number (મોબાઇલ)',
                     prefixIcon: Icon(Icons.phone_outlined),
                     border: OutlineInputBorder(),
                   ),
-                  validator: (value) {
-                    if (value == null || value.trim().isEmpty) {
-                      return 'Please enter phone number';
-                    }
-                    if (value.trim().length < 8) {
-                      return 'Enter a valid phone number';
-                    }
+                  validator: (v) {
+                    if (v == null || v.trim().isEmpty) return 'Please enter phone number';
+                    if (v.trim().length < 8) return 'Enter a valid phone number';
                     return null;
                   },
                 ),
               ),
             ],
           ),
-          
           const SizedBox(height: 20),
-          
-          // Trip Selector Dropdown
-          DropdownButtonFormField<String>(
-            value: _selectedTripId,
-            decoration: const InputDecoration(
-              labelText: 'Select Scheduled Trip Route',
-              prefixIcon: Icon(Icons.route_outlined),
-              border: OutlineInputBorder(),
-            ),
-            items: const [
-              DropdownMenuItem(value: 'TR001', child: Text('Delhi - Jaipur (Live)')),
-              DropdownMenuItem(value: 'TR002', child: Text('Mumbai - Pune (Scheduled)')),
-              DropdownMenuItem(value: 'TR003', child: Text('Bangalore - Chennai (Completed)')),
+          Row(
+            children: [
+              Expanded(
+                child: DropdownButtonFormField<String>(
+                  value: _selectedBoarding,
+                  decoration: const InputDecoration(
+                    labelText: 'Boarding Point (બેસવાનું)',
+                    prefixIcon: Icon(Icons.location_on_outlined),
+                    border: OutlineInputBorder(),
+                  ),
+                  items: boardingPoints
+                      .map((p) => DropdownMenuItem(value: p, child: Text(p)))
+                      .toList(),
+                  onChanged: (v) => setState(() => _selectedBoarding = v),
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: DropdownButtonFormField<String>(
+                  value: _selectedDrop,
+                  decoration: const InputDecoration(
+                    labelText: 'Drop Point (ઉતરવાનું ગામ)',
+                    prefixIcon: Icon(Icons.flag_outlined),
+                    border: OutlineInputBorder(),
+                  ),
+                  items: dropPoints
+                      .map((p) => DropdownMenuItem(value: p, child: Text(p)))
+                      .toList(),
+                  onChanged: (v) => setState(() => _selectedDrop = v),
+                ),
+              ),
             ],
-            onChanged: (value) {
-              setState(() {
-                _selectedTripId = value;
-                _selectedSeatNumber = null; // Reset seat when trip changes
-              });
-            },
           ),
-          
-          const SizedBox(height: 24),
-          
-          // Sleeper Seat Selector View (displays only when trip is selected)
+          const SizedBox(height: 20),
+          if (_loadingTrips)
+            const Center(child: CircularProgressIndicator())
+          else
+            DropdownButtonFormField<String>(
+              value: _selectedTripId,
+              decoration: const InputDecoration(
+                labelText: 'Select Scheduled Trip Route',
+                prefixIcon: Icon(Icons.route_outlined),
+                border: OutlineInputBorder(),
+              ),
+              items: _trips
+                  .map((t) => DropdownMenuItem(value: t.id, child: Text(_tripLabel(t))))
+                  .toList(),
+              onChanged: (value) {
+                setState(() {
+                  _selectedTripId = value;
+                  _selectedSeatNumber = null;
+                });
+                if (value != null) _loadBookedSeats(value);
+              },
+            ),
           if (_selectedTripId != null) ...[
+            const SizedBox(height: 24),
             Text(
-              'Select Seat from Layout Berth',
+              'Select Seat from Layout Berth (2x1 Sleeper)',
               style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.grey.shade800),
             ),
             const SizedBox(height: 12),
@@ -388,14 +437,10 @@ class _TicketBookingFormState extends State<TicketBookingForm> {
               ),
               child: Column(
                 children: [
-                  // Current selection display indicator
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Text(
-                        'Selected Seat No:',
-                        style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
-                      ),
+                      Text('Selected Seat No:', style: TextStyle(color: Colors.grey.shade600, fontSize: 13)),
                       Chip(
                         backgroundColor: _selectedSeatNumber != null
                             ? _primaryColor.withOpacity(0.12)
@@ -412,28 +457,21 @@ class _TicketBookingFormState extends State<TicketBookingForm> {
                     ],
                   ),
                   const Divider(),
-                  
-                  // Sleeper Seat layout widget
                   SleeperLayout(
-                    bookedSeats: _bookedSeatsPerTrip[_selectedTripId!] ?? [],
+                    bookedSeats: _bookedSeats,
                     themeColor: _primaryColor,
                     onSeatSelected: (seatLabel) {
                       setState(() {
-                        if (_selectedSeatNumber == seatLabel) {
-                          _selectedSeatNumber = null; // Toggle off selection
-                        } else {
-                          _selectedSeatNumber = seatLabel;
-                        }
+                        _selectedSeatNumber =
+                            _selectedSeatNumber == seatLabel ? null : seatLabel;
                       });
                     },
                   ),
                 ],
               ),
             ),
-            const SizedBox(height: 24),
           ],
-          
-          // Submit Booking Button
+          const SizedBox(height: 24),
           SizedBox(
             width: double.infinity,
             height: 48,

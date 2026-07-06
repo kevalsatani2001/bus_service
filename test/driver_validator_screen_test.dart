@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:bus_service/main.dart';
 import 'package:bus_service/core/blocs/auth_bloc.dart';
 import 'package:bus_service/core/navigation/app_router.dart';
+import 'package:bus_service/core/models/auth_session.dart';
 import 'package:bus_service/core/models/user_staff.dart';
 import 'package:bus_service/features/ticket_verification/presentation/driver_validator_screen.dart';
 
@@ -21,17 +22,21 @@ void main() {
     ));
     await tester.pump();
 
-    // Authenticate as a driver and navigate
-    AppRouter.authService.login(UserRole.driver);
+    authBloc.add(AuthLoginRequested(AuthUserSession(
+      uid: 'D101',
+      name: 'Rajesh Kumar',
+      phone: '7777777777',
+      role: UserRole.driver,
+      tenantId: 'T1',
+    )));
+    await tester.pumpAndSettle();
+
     AppRouter.router.go('/driver/home');
     await tester.pumpAndSettle();
 
-    // Verify driver is on the home screen
-    expect(find.text('Driver Home Screen (GPS Control Screen)'), findsOneWidget);
-    expect(find.text('Verify Boarding Passenger'), findsOneWidget);
+    expect(find.text('Verify Boarding (Ticket Scan)'), findsOneWidget);
 
-    // Tap verify boarding button
-    await tester.tap(find.text('Verify Boarding Passenger'));
+    await tester.tap(find.text('Verify Boarding (Ticket Scan)'));
     await tester.pumpAndSettle();
 
     // Verify we navigated to DriverValidatorScreen
