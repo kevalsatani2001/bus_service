@@ -48,6 +48,7 @@ class DefaultFirebaseOptions {
     authDomain: 'building-guard-app.firebaseapp.com',
     storageBucket: 'building-guard-app.firebasestorage.app',
     measurementId: 'G-Y7VNBYJHYV',
+    databaseURL: 'https://building-guard-app-default-rtdb.firebaseio.com',
   );
 
   static const FirebaseOptions android = FirebaseOptions(
@@ -56,6 +57,7 @@ class DefaultFirebaseOptions {
     messagingSenderId: '692713078513',
     projectId: 'building-guard-app',
     storageBucket: 'building-guard-app.firebasestorage.app',
+    databaseURL: 'https://building-guard-app-default-rtdb.firebaseio.com',
   );
 
   static const FirebaseOptions ios = FirebaseOptions(
@@ -65,6 +67,7 @@ class DefaultFirebaseOptions {
     projectId: 'building-guard-app',
     storageBucket: 'building-guard-app.firebasestorage.app',
     iosBundleId: 'com.example.busService',
+    databaseURL: 'https://building-guard-app-default-rtdb.firebaseio.com',
   );
 
   static const FirebaseOptions macos = FirebaseOptions(
@@ -74,6 +77,7 @@ class DefaultFirebaseOptions {
     projectId: 'building-guard-app',
     storageBucket: 'building-guard-app.firebasestorage.app',
     iosBundleId: 'com.example.busService',
+    databaseURL: 'https://building-guard-app-default-rtdb.firebaseio.com',
   );
 
   static const FirebaseOptions windows = FirebaseOptions(
@@ -84,5 +88,6 @@ class DefaultFirebaseOptions {
     authDomain: 'building-guard-app.firebaseapp.com',
     storageBucket: 'building-guard-app.firebasestorage.app',
     measurementId: 'G-59CV1ZXY5R',
+    databaseURL: 'https://building-guard-app-default-rtdb.firebaseio.com',
   );
 }

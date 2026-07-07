@@ -143,8 +143,12 @@ class _PassengerMapScreenState extends State<PassengerMapScreen> with TickerProv
 
   void _onLocationUpdate(LatLng newPosition) {
     if (_currentPosition == null) {
-      _currentPosition = newPosition;
-      _previousPosition = newPosition;
+      if (mounted) {
+        setState(() {
+          _currentPosition = newPosition;
+          _previousPosition = newPosition;
+        });
+      }
       _centerCameraOnBus();
       _recalculateEta();
       return;
@@ -355,9 +359,14 @@ class _PassengerMapScreenState extends State<PassengerMapScreen> with TickerProv
                   final loc = Map<String, dynamic>.from(data['currentLocation'] as Map);
                   final lat = (loc['latitude'] ?? loc['lat'] as num).toDouble();
                   final lng = (loc['longitude'] ?? loc['lng'] as num).toDouble();
-                  WidgetsBinding.instance.addPostFrameCallback((_) {
-                    _onLocationUpdate(LatLng(lat, lng));
-                  });
+                  
+                  if (_currentPosition == null ||
+                      _currentPosition!.latitude != lat ||
+                      _currentPosition!.longitude != lng) {
+                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                      _onLocationUpdate(LatLng(lat, lng));
+                    });
+                  }
                 }
                 
                 // Extract metrics
@@ -365,15 +374,17 @@ class _PassengerMapScreenState extends State<PassengerMapScreen> with TickerProv
                 final stopIdx = data['currentActiveStopIndex'] as int? ?? 0;
                 final gpsLost = data['isGpsLost'] as bool? ?? false;
                 
-                WidgetsBinding.instance.addPostFrameCallback((_) {
-                  if (mounted) {
-                    setState(() {
-                      _speed = speed;
-                      _activeStopIndex = stopIdx;
-                      _isGpsLost = gpsLost;
-                    });
-                  }
-                });
+                if (_speed != speed || _activeStopIndex != stopIdx || _isGpsLost != gpsLost) {
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    if (mounted) {
+                      setState(() {
+                        _speed = speed;
+                        _activeStopIndex = stopIdx;
+                        _isGpsLost = gpsLost;
+                      });
+                    }
+                  });
+                }
               }
             } catch (_) {}
           }

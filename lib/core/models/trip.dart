@@ -134,7 +134,10 @@ class Trip {
 
   /// Deserializes a [Trip] from a JSON map.
   factory Trip.fromJson(Map<String, dynamic> json) {
-    final locationMap = json['currentLocation'] as Map<String, dynamic>?;
+    final rawLocation = json['currentLocation'];
+    final locationMap = rawLocation is Map
+        ? Map<String, dynamic>.from(rawLocation)
+        : null;
     return Trip(
       id: json['id'] as String? ?? '',
       tenantId: json['tenantId'] as String? ?? '',

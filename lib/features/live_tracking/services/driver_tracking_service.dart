@@ -12,7 +12,7 @@ import 'package:bus_service/core/services/firestore_service.dart';
 /// Uses [flutter_background_service] for foreground execution on Android & tasks on iOS
 /// and [geolocator] to fetch accurate GPS coordinates.
 class DriverTrackingService {
-  static const String notificationChannelId = 'driver_live_location_channel';
+  static const String notificationChannelId = 'my_foreground';
   static const int notificationId = 999;
 
   /// Configures and initializes the background service configuration.
@@ -36,6 +36,53 @@ class DriverTrackingService {
         onBackground: onIosBackground,
       ),
     );
+  }
+
+  static Timer? _foregroundTimer;
+  static String? _activeForegroundTripId;
+
+  static void _startForegroundFallbackTracking(String tripId) {
+    _foregroundTimer?.cancel();
+    _activeForegroundTripId = tripId;
+
+    _foregroundTimer = Timer.periodic(const Duration(seconds: 10), (timer) async {
+      if (_activeForegroundTripId == null) {
+        timer.cancel();
+        return;
+      }
+
+      try {
+        final position = await Geolocator.getCurrentPosition(
+          locationSettings: const LocationSettings(
+            accuracy: LocationAccuracy.high,
+          ),
+        );
+
+        final dbRef = FirebaseDatabase.instance
+            .ref('trips/$_activeForegroundTripId/currentLocation');
+
+        final locationData = {
+          'latitude': position.latitude,
+          'longitude': position.longitude,
+          'lat': position.latitude,
+          'lng': position.longitude,
+          'lastUpdated': DateTime.now().toIso8601String(),
+        };
+
+        try {
+          await dbRef.set(locationData);
+          await OfflineLocationQueue.instance.syncPending();
+        } catch (_) {
+          await OfflineLocationQueue.instance.enqueue(
+            tripId: _activeForegroundTripId!,
+            lat: position.latitude,
+            lng: position.longitude,
+          );
+        }
+      } catch (_) {
+        // GPS timeout or network issues
+      }
+    });
   }
 
   /// Starts location tracking in the foreground/background for the given [tripId].
@@ -81,34 +128,46 @@ class DriverTrackingService {
       return false;
     }
 
-    // 3. Start the background service
-    final service = FlutterBackgroundService();
-    bool isRunning = await service.isRunning();
-    if (!isRunning) {
-      await service.startService();
-    }
+    // 3. Start the background service with foreground fallback
+    try {
+      final service = FlutterBackgroundService();
+      bool isRunning = await service.isRunning();
+      if (!isRunning) {
+        await service.startService();
+      }
 
-    // 4. Wait for the service to be initialized, then send the start tracking event with tripId
-    int retries = 0;
-    while (!(await service.isRunning()) && retries < 15) {
-      await Future.delayed(const Duration(milliseconds: 200));
-      retries++;
-    }
+      // 4. Wait for the service to be initialized, then send the start tracking event with tripId
+      int retries = 0;
+      while (!(await service.isRunning()) && retries < 15) {
+        await Future.delayed(const Duration(milliseconds: 200));
+        retries++;
+      }
 
-    service.invoke('startTracking', {'tripId': tripId});
+      service.invoke('startTracking', {'tripId': tripId});
+    } catch (e) {
+      debugPrint("Background service not supported or failed to start: $e. Falling back to foreground tracking.");
+      _startForegroundFallbackTracking(tripId);
+    }
     return true;
   }
 
   /// Stops tracking, removes the foreground notification, and stops the service.
   static Future<void> stopTracking() async {
+    _foregroundTimer?.cancel();
+    _foregroundTimer = null;
+    _activeForegroundTripId = null;
+
     final service = FlutterBackgroundService();
-    if (await service.isRunning()) {
-      service.invoke('stopService');
-    }
+    try {
+      if (await service.isRunning()) {
+        service.invoke('stopService');
+      }
+    } catch (_) {}
   }
 
   /// Returns true if background tracking is currently active.
   static Future<bool> isTrackingActive() async {
+    if (_foregroundTimer != null) return true;
     try {
       return await FlutterBackgroundService().isRunning();
     } catch (_) {
