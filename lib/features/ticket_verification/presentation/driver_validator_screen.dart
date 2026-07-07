@@ -81,7 +81,7 @@ class _DriverValidatorScreenState extends State<DriverValidatorScreen> {
       bool isAlreadyScanned = false;
 
       if (!_isTesting) {
-        final ticketSnap = await FirebaseFirestore.instance
+        final ticketSnap = await FirestoreService.database
             .collection('tickets')
             .doc(ticketId)
             .get();
@@ -120,7 +120,7 @@ class _DriverValidatorScreenState extends State<DriverValidatorScreen> {
 
       // 4. Mark checked-in true in Firestore
       if (!_isTesting) {
-        await FirebaseFirestore.instance
+        await FirestoreService.database
             .collection('tickets')
             .doc(ticketId)
             .update({'isScanned': true});
@@ -176,7 +176,7 @@ class _DriverValidatorScreenState extends State<DriverValidatorScreen> {
     // Stream of boarding tally count
     final Stream<List<int>> tallyStream = _isTesting
         ? Stream.value([2, 5])
-        : FirebaseFirestore.instance
+        : FirestoreService.database
             .collection('tickets')
             .where('tripId', isEqualTo: widget.tripId)
             .snapshots()

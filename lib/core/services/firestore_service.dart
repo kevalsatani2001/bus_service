@@ -7,16 +7,29 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:bus_service/core/models/auth_session.dart';
 import 'package:bus_service/core/models/models.dart';
 import 'package:bus_service/core/services/seed_data_service.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_core/firebase_core.dart';
 
 /// Central Firestore data access with seed-data fallback.
 class FirestoreService {
   FirestoreService._();
   static final FirestoreService instance = FirestoreService._();
 
+  static FirebaseFirestore get database {
+    if (!kIsWeb && Platform.environment.containsKey('FLUTTER_TEST')) {
+      return FirebaseFirestore.instance;
+    }
+    try {
+      return FirebaseFirestore.instanceFor(app: Firebase.app(), databaseId: 'bus-service');
+    } catch (_) {
+      return FirebaseFirestore.instance;
+    }
+  }
+
   FirebaseFirestore? get _db {
     if (_isTesting) return null;
     try {
-      return FirebaseFirestore.instance;
+      return FirestoreService.database;
     } catch (_) {
       return null;
     }
@@ -530,7 +543,28 @@ class FirestoreService {
     await _ensureLocalDbInitialized();
     final digits = staff.phone.replaceAll(RegExp(r'[^0-9]'), '');
     final normalizedPhone = digits.length >= 10 ? digits.substring(digits.length - 10) : digits;
-    final normalizedStaff = staff.copyWith(phone: normalizedPhone);
+    
+    String uid = staff.uid;
+    if (!_isTesting) {
+      try {
+        final authEmail = '$normalizedPhone@mytravels.com';
+        final cred = await FirebaseAuth.instance.createUserWithEmailAndPassword(
+          email: authEmail,
+          password: pin,
+        );
+        if (cred.user != null) {
+          uid = cred.user!.uid;
+        }
+      } on FirebaseAuthException catch (e) {
+        if (e.code == 'email-already-in-use') {
+          throw Exception('આ મોબાઈલ નંબર પહેલેથી રજીસ્ટર થયેલ છે (This phone number is already registered)');
+        } else {
+          rethrow;
+        }
+      }
+    }
+
+    final normalizedStaff = staff.copyWith(uid: uid, phone: normalizedPhone);
 
     _localStaff.removeWhere((s) => s.uid == normalizedStaff.uid);
     _localStaff.add(normalizedStaff);

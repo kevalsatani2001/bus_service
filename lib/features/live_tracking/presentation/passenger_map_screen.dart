@@ -177,12 +177,16 @@ class _PassengerMapScreenState extends State<PassengerMapScreen> with TickerProv
   }
 
   void _centerCameraOnBus() {
-    final pos = _getInterpolatedLatLng();
-    if (!_hasInitiallyCentered) {
-      _mapController.move(pos, 14.5);
-      _hasInitiallyCentered = true;
-    } else {
-      _mapController.move(pos, _mapController.camera.zoom);
+    try {
+      final pos = _getInterpolatedLatLng();
+      if (!_hasInitiallyCentered) {
+        _mapController.move(pos, 14.5);
+        _hasInitiallyCentered = true;
+      } else {
+        _mapController.move(pos, _mapController.camera.zoom);
+      }
+    } catch (_) {
+      // Map controller is not yet mounted/initialized
     }
   }
 
@@ -326,9 +330,15 @@ class _PassengerMapScreenState extends State<PassengerMapScreen> with TickerProv
   @override
   Widget build(BuildContext context) {
     // Stream complete trip location object from database
-    final databaseStream = _isTesting
-        ? const Stream<DatabaseEvent>.empty()
-        : FirebaseDatabase.instance.ref('trips/${widget.tripId}').onValue;
+    Stream<DatabaseEvent>? databaseStream;
+    if (!_isTesting) {
+      try {
+        databaseStream = FirebaseDatabase.instance.ref('trips/${widget.tripId}').onValue;
+      } catch (e) {
+        print("FirebaseDatabase initialization failed: $e");
+      }
+    }
+    databaseStream ??= const Stream<DatabaseEvent>.empty();
 
     return Scaffold(
       body: StreamBuilder<DatabaseEvent>(

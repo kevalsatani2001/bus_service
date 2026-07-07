@@ -80,7 +80,7 @@ class _PassengerScanScreenState extends State<PassengerScanScreen> {
       String tenantName = 'Multi-Tenant Agency';
 
       if (!_isTesting) {
-        final doc = await FirebaseFirestore.instance
+        final doc = await FirestoreService.database
             .collection('agencies')
             .doc(tenantId)
             .get();
@@ -144,7 +144,7 @@ class _PassengerScanScreenState extends State<PassengerScanScreen> {
 
       if (!_isTesting) {
         // Query ticket document to get its tenantId
-        final ticketDoc = await FirebaseFirestore.instance
+        final ticketDoc = await FirestoreService.database
             .collection('tickets')
             .doc(ticketId.trim())
             .get();
@@ -155,7 +155,7 @@ class _PassengerScanScreenState extends State<PassengerScanScreen> {
 
         tenantId = ticketDoc.data()!['tenantId'] as String? ?? '';
         
-        final agencyDoc = await FirebaseFirestore.instance
+        final agencyDoc = await FirestoreService.database
             .collection('agencies')
             .doc(tenantId)
             .get();

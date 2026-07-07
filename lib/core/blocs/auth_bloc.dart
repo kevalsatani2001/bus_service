@@ -2,6 +2,9 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:bus_service/core/models/auth_session.dart';
 import 'package:bus_service/core/models/user_staff.dart';
 import 'package:bus_service/core/services/auth_service.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'dart:io' show Platform;
 
 abstract class AuthEvent {}
 
@@ -32,7 +35,13 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
       emit(AuthState(isAuthenticated: true, session: event.session));
     });
 
-    on<AuthLogoutRequested>((event, emit) {
+    on<AuthLogoutRequested>((event, emit) async {
+      final isTesting = !kIsWeb && Platform.environment.containsKey('FLUTTER_TEST');
+      if (!isTesting) {
+        try {
+          await FirebaseAuth.instance.signOut();
+        } catch (_) {}
+      }
       emit(AuthState.initial());
     });
   }

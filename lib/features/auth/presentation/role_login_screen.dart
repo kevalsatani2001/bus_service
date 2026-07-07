@@ -52,6 +52,12 @@ class _RoleLoginScreenState extends State<RoleLoginScreen> {
   final _driverVehicleController = TextEditingController();
   final _driverPasswordController = TextEditingController();
 
+  // Admin Registration Controllers
+  final _adminNameController = TextEditingController();
+  final _adminEmailController = TextEditingController();
+  final _adminPhoneController = TextEditingController();
+  final _adminPasswordController = TextEditingController();
+
   // UI state
   bool _isRegister = false;
   bool _loading = false;
@@ -87,6 +93,10 @@ class _RoleLoginScreenState extends State<RoleLoginScreen> {
     _driverLicenseController.dispose();
     _driverVehicleController.dispose();
     _driverPasswordController.dispose();
+    _adminNameController.dispose();
+    _adminEmailController.dispose();
+    _adminPhoneController.dispose();
+    _adminPasswordController.dispose();
     super.dispose();
   }
 
@@ -295,21 +305,67 @@ class _RoleLoginScreenState extends State<RoleLoginScreen> {
     }
   }
 
-  void _fillDemo(String phone, String pin) {
+  Future<void> _registerAdmin() async {
+    final name = _adminNameController.text.trim();
+    final email = _adminEmailController.text.trim();
+    final phone = _adminPhoneController.text.trim();
+    final password = _adminPasswordController.text.trim();
+
+    if (name.isEmpty || phone.isEmpty || password.isEmpty) {
+      setState(() => _error = 'કૃપા કરીને બધી જરૂરી વિગતો ભરો (Please fill required fields)');
+      return;
+    }
+    if (phone.length < 10) {
+      setState(() => _error = 'મોબાઈલ નંબર ૧૦ અંકનો હોવો જોઈએ (Phone must be 10 digits)');
+      return;
+    }
+    if (password.length < 4) {
+      setState(() => _error = 'પાસવર્ડ ઓછામાં ઓછો ૪ અંકનો હોવો જોઈએ (Password min 4 chars)');
+      return;
+    }
+
     setState(() {
-      _isRegister = false;
-      _phoneController.text = phone;
-      _pinController.text = pin;
+      _loading = true;
       _error = null;
     });
-  }
 
-  List<Map<String, String>> get _relevantDemos {
-    final roles = {widget.expectedRole, ...?widget.alsoAllowRoles};
-    return AuthService.demoAccounts.where((d) {
-      final role = UserRole.fromString(d['role']!);
-      return roles.contains(role);
-    }).toList();
+    try {
+      final adminId = 'AD${DateTime.now().millisecondsSinceEpoch % 100000}';
+
+      final adminStaff = UserStaff(
+        uid: adminId,
+        name: name,
+        phone: phone,
+        role: UserRole.admin,
+        tenantId: '',
+        email: email,
+        status: 'approved',
+      );
+
+      await FirestoreService.instance.saveStaffWithPin(adminStaff, password);
+
+      if (!mounted) return;
+
+      setState(() {
+        _loading = false;
+        _isRegister = false;
+        _phoneController.text = phone;
+        _pinController.text = password;
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('સુપર એડમિન નોંધણી સફળ! (Super Admin registered successfully)'),
+          backgroundColor: Colors.green,
+          duration: Duration(seconds: 4),
+        ),
+      );
+    } catch (e) {
+      setState(() {
+        _loading = false;
+        _error = 'નોંધણી નિષ્ફળ: ${e.toString()}';
+      });
+    }
   }
 
   @override
@@ -398,56 +454,6 @@ class _RoleLoginScreenState extends State<RoleLoginScreen> {
                       ),
                     ),
                     
-                    // Demo credentials helper
-                    if (!_isRegister && _relevantDemos.isNotEmpty) ...[
-                      const SizedBox(height: 20),
-                      Container(
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: Colors.amber.shade50,
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(color: Colors.amber.shade200),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: [
-                                Icon(Icons.info_outline, size: 18, color: Colors.amber.shade800),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: Text(
-                                    'ડેમો લોગિન વિગતો (Demo Logins)',
-                                    style: TextStyle(fontWeight: FontWeight.bold, color: Colors.amber.shade900),
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 8),
-                            ..._relevantDemos.map((d) => Padding(
-                                  padding: const EdgeInsets.only(bottom: 6),
-                                  child: InkWell(
-                                    onTap: () => _fillDemo(d['phone']!, d['pin']!),
-                                    child: Row(
-                                      children: [
-                                        Expanded(
-                                          child: Text(
-                                            '${d['name']}\n${d['phone']} / PIN ${d['pin']}',
-                                            style: const TextStyle(fontSize: 12),
-                                          ),
-                                        ),
-                                        Text(
-                                          'Use (વાપરો)',
-                                          style: TextStyle(color: widget.accentColor, fontWeight: FontWeight.bold, fontSize: 12),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                )),
-                          ],
-                        ),
-                      ),
-                    ],
                   ],
                 ),
               ),
@@ -459,7 +465,6 @@ class _RoleLoginScreenState extends State<RoleLoginScreen> {
   }
 
   Widget _buildToggle() {
-    if (widget.expectedRole == UserRole.admin) return const SizedBox.shrink();
     return Container(
       margin: const EdgeInsets.only(bottom: 24),
       decoration: BoxDecoration(
@@ -581,6 +586,8 @@ class _RoleLoginScreenState extends State<RoleLoginScreen> {
       return _buildAgencyRegisterForm();
     } else if (widget.expectedRole == UserRole.driver) {
       return _buildDriverRegisterForm();
+    } else if (widget.expectedRole == UserRole.admin) {
+      return _buildAdminRegisterForm();
     }
     return const SizedBox.shrink();
   }
@@ -800,6 +807,75 @@ class _RoleLoginScreenState extends State<RoleLoginScreen> {
                     child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white),
                   )
                 : const Text('Register Driver (નોંધણી કરો)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildAdminRegisterForm() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        TextField(
+          controller: _adminNameController,
+          decoration: const InputDecoration(
+            labelText: 'Full Name (પૂરું નામ) *',
+            prefixIcon: Icon(Icons.person_outlined),
+            border: OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(12))),
+          ),
+        ),
+        const SizedBox(height: 12),
+        TextField(
+          controller: _adminEmailController,
+          keyboardType: TextInputType.emailAddress,
+          decoration: const InputDecoration(
+            labelText: 'Email Address (ઈમેલ) (વૈકલ્પિક)',
+            prefixIcon: Icon(Icons.email_outlined),
+            border: OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(12))),
+          ),
+        ),
+        const SizedBox(height: 12),
+        TextField(
+          controller: _adminPhoneController,
+          keyboardType: TextInputType.phone,
+          decoration: const InputDecoration(
+            labelText: 'Phone Number (મોબાઈલ) *',
+            prefixIcon: Icon(Icons.phone_outlined),
+            border: OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(12))),
+          ),
+        ),
+        const SizedBox(height: 12),
+        TextField(
+          controller: _adminPasswordController,
+          obscureText: _obscurePin,
+          keyboardType: TextInputType.number,
+          decoration: InputDecoration(
+            labelText: 'Password / PIN (૪+ અંક) *',
+            prefixIcon: const Icon(Icons.lock_outline),
+            border: const OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(12))),
+            suffixIcon: IconButton(
+              icon: Icon(_obscurePin ? Icons.visibility_off : Icons.visibility),
+              onPressed: () => setState(() => _obscurePin = !_obscurePin),
+            ),
+          ),
+        ),
+        const SizedBox(height: 24),
+        SizedBox(
+          height: 50,
+          child: ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: widget.accentColor,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+            onPressed: _loading ? null : _registerAdmin,
+            child: _loading
+                ? const SizedBox(
+                    width: 22,
+                    height: 22,
+                    child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white),
+                  )
+                : const Text('Register Admin (નોંધણી)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
           ),
         ),
       ],
